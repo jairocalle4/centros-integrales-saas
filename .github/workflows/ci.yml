@@ -10,13 +10,11 @@ jobs:
   web-checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 11
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: 'pnpm'
@@ -34,34 +32,38 @@ jobs:
   dotnet-checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
       - name: Restore dependencies
-        run: dotnet restore services/electronic-billing
+        run: dotnet restore services/electronic-billing/CentrosIntegrales.Billing.slnx
       - name: Build
-        run: dotnet build services/electronic-billing --no-restore
+        run: dotnet build services/electronic-billing/CentrosIntegrales.Billing.slnx -c Release --no-restore
       - name: Test
-        run: dotnet test services/electronic-billing --no-build --verbosity normal
+        run: dotnet test services/electronic-billing/CentrosIntegrales.Billing.slnx -c Release --no-build
 
   supabase-rls-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Node and pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 11
-      - uses: actions/setup-node@v4
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - name: Start Supabase DB and Run Tests
-        run: |
-          pnpm exec supabase start
-          pnpm exec supabase db lint --level error
-          pnpm exec supabase test db
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start DB
+        run: pnpm exec supabase start
+      - name: Reset DB
+        run: pnpm exec supabase db reset
+      - name: Lint DB
+        run: pnpm exec supabase db lint --level error
+      - name: Test DB
+        run: pnpm exec supabase test db
+      - name: Stop DB
         if: always()
+        run: pnpm exec supabase stop --no-backup

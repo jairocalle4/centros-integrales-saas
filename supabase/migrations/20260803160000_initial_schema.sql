@@ -67,7 +67,7 @@ CREATE OR REPLACE FUNCTION public.has_organization_role(org_id UUID, required_ro
 RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.organization_members
@@ -85,7 +85,7 @@ CREATE OR REPLACE FUNCTION public.check_member_management()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $$
 DECLARE
   is_owner BOOLEAN;
@@ -149,9 +149,6 @@ CREATE POLICY "Owners and admins can update their organization" ON public.organi
   public.has_organization_role(id, ARRAY['owner','admin']::public.organization_role[])
 ) WITH CHECK (
   public.has_organization_role(id, ARRAY['owner','admin']::public.organization_role[])
-);
-CREATE POLICY "Owners and admins can insert organization" ON public.organizations FOR INSERT TO authenticated WITH CHECK (
-  true -- The first org creation might be complex, we allow authenticated to create. The trigger assigns them as owner (out of scope for this schema, usually done via Edge function).
 );
 
 -- Políticas: organization_members

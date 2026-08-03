@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(18);
+SELECT plan(20);
 
 -- Preparativos
 SELECT set_config('role', 'authenticated', true);
@@ -17,17 +17,23 @@ SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111
 SELECT is_empty('SELECT id FROM public.organization_members WHERE organization_id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', 'Owner A no ve miembros de B');
 
 -- 4. actualización cruzada afecta cero filas y B permanece sin cambios
-UPDATE public.organizations SET name = 'Hack' WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
--- Para verificar, cambiamos a postgres (bypass RLS)
+WITH updated AS (
+  UPDATE public.organizations SET name = 'Hack' WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+  RETURNING id
+)
+SELECT results_eq('SELECT count(*) FROM updated', $$VALUES (0::bigint)$$, 'Actualización cruzada afecta cero filas');
 SELECT set_config('role', 'postgres', true);
-SELECT results_eq('SELECT name FROM public.organizations WHERE id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', $$VALUES ('Organización B')$$, 'Actualización cruzada falló en Org B');
+SELECT results_eq('SELECT name FROM public.organizations WHERE id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', $$VALUES ('Organización B')$$, 'El dato original sigue intacto tras UPDATE');
 SELECT set_config('role', 'authenticated', true);
 
 -- 5. eliminación cruzada afecta cero filas y B permanece existente
-DELETE FROM public.organizations WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+WITH deleted AS (
+  DELETE FROM public.organizations WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+  RETURNING id
+)
+SELECT results_eq('SELECT count(*) FROM deleted', $$VALUES (0::bigint)$$, 'Eliminación cruzada afecta cero filas');
 SELECT set_config('role', 'postgres', true);
-SELECT is_empty('SELECT id FROM public.organizations WHERE id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'' AND false', 'B existe');
-SELECT results_eq('SELECT COUNT(*) > 0 FROM public.organizations WHERE id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', $$VALUES (true)$$, 'Eliminación cruzada no afectó B');
+SELECT results_eq('SELECT name FROM public.organizations WHERE id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', $$VALUES ('Organización B')$$, 'El dato original sigue intacto tras DELETE');
 SELECT set_config('role', 'authenticated', true);
 
 -- 6. inserción de un integrante en otra organización es rechazada
@@ -56,23 +62,25 @@ SELECT is_empty('SELECT id FROM public.organizations', 'Integrante inactivo no v
 SELECT set_config('request.jwt.claims', '{"sub": "66666666-6666-6666-6666-666666666666"}', true); -- Unauth User
 SELECT is_empty('SELECT id FROM public.organizations', 'Usuario sin membresía no ve org');
 
--- 12. anon no puede leer organizaciones ni integrantes
+-- 12. usuario autenticado sin membresía no puede crear organizaciones
+SELECT throws_ok($$ INSERT INTO public.organizations (name) VALUES ('Hacked Org') $$, 'new row violates row-level security policy for table "organizations"', 'Usuario sin membresía no puede crear organizaciones');
+
+-- 13. anon no puede leer organizaciones ni integrantes
 SELECT set_config('role', 'anon', true);
 SELECT set_config('request.jwt.claims', '', true);
 SELECT is_empty('SELECT id FROM public.organizations', 'Anon no lee orgs');
 SELECT is_empty('SELECT id FROM public.organization_members', 'Anon no lee miembros');
 
--- 13. anon no puede crear organizaciones
+-- 14. anon no puede crear organizaciones
 SELECT throws_ok($$ INSERT INTO public.organizations (name) VALUES ('X') $$, 'new row violates row-level security policy for table "organizations"', 'Anon no crea orgs');
 
--- 14. una operación válida dentro de la organización sí funciona
+-- 15. una operación válida dentro de la organización sí funciona
 SELECT set_config('role', 'authenticated', true);
 SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111111111"}', true); -- Owner A
 INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '66666666-6666-6666-6666-666666666666', 'staff');
 SELECT results_eq('SELECT COUNT(*) > 0 FROM public.organization_members WHERE user_id = ''66666666-6666-6666-6666-666666666666''', $$VALUES (true)$$, 'Owner puede insertar staff');
 
--- 15. no es posible falsificar el actor de un registro de auditoría
--- Al insertar en audit_logs, el usuario autenticado está bloqueado (solo service_role puede).
+-- 16. no es posible falsificar el actor de un registro de auditoría
 SELECT throws_ok($$ INSERT INTO public.audit_logs (organization_id, user_id, action, entity, entity_id) VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', 'login', 'auth', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') $$, 'new row violates row-level security policy for table "audit_logs"', 'Authenticated user cannot insert audit logs');
 
 SELECT * FROM finish();

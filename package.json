@@ -11,16 +11,11 @@
     "typecheck": "pnpm --recursive typecheck",
     "test:web": "pnpm --filter web test",
     "test:db": "supabase test db",
-    "test:billing": "dotnet test services/electronic-billing -c Release",
+    "test:billing": "dotnet test services/electronic-billing/CentrosIntegrales.Billing.slnx -c Release",
     "verify": "pnpm lint && pnpm typecheck && pnpm test:web && pnpm build:web && pnpm test:billing",
     "supabase:init": "supabase init"
   },
   "devDependencies": {
-    "supabase": "1.183.5"
-  },
-  "pnpm": {
-    "approvedBuilds": [
-      "supabase"
-    ]
+    "supabase": "2.111.0"
   }
 }
