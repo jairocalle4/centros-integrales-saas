@@ -1,3 +1,2 @@
-git rm -f c.js c.json r.js
-git commit -a -m "fix: correct pgTAP CTE scoping for results_eq assertions"
+git commit -a -m "fix: use is instead of results_eq for pgTAP CTE assertions"
 git push
