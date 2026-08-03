@@ -1,9 +1,14 @@
-# Dependencias de Skills de Terceros
+# Third Party Skills Registration
 
-| Repositorio Oficial | Skill | Licencia Asumida (Repo) | Origen de Instalación |
-| --- | --- | --- | --- |
-| `supabase/agent-skills` | `supabase` | Apache 2.0 (Supabase) | GitHub Main (Automático) |
-| `supabase/agent-skills` | `supabase-postgres-best-practices` | Apache 2.0 (Supabase) | GitHub Main (Automático) |
-| `vercel-labs/agent-skills` | `vercel-react-best-practices` | MIT (Vercel) | GitHub Main (Automático) |
+| Skill Name | Repositorio / Procedencia | Commit SHA Exacto | Versión | Licencia Comprobada |
+| --- | --- | --- | --- | --- |
+| `supabase` | `https://github.com/supabase/agent-skills.git` | `1207767388a0ffb55f21fb4e6988fee96942431d` | N/A | [Apache-2.0](https://github.com/supabase/agent-skills/blob/main/LICENSE) |
+| `supabase-postgres-best-practices` | `https://github.com/supabase/agent-skills.git` | `1207767388a0ffb55f21fb4e6988fee96942431d` | N/A | [Apache-2.0](https://github.com/supabase/agent-skills/blob/main/LICENSE) |
+| `vercel-react-best-practices` | `https://github.com/vercel-labs/agent-skills.git` | `7c180d9044c9ae2b442b567aad4e42a28dd5ed62` | N/A | [MIT](https://github.com/vercel-labs/agent-skills/blob/main/LICENSE) |
+| `centros-integrales-domain` | Local (Propia) | - | - | Privada |
+| `sri-electronic-billing-ecuador` | Local (Propia) | - | - | Privada |
 
-> *Nota: Estas skills se instalaron de forma selectiva en `.agents/skills/` y se vincularon a este workspace. No se instalaron globalmente ni se copiaron todos los paquetes del repositorio.*
+## Notas
+- **Procedencia Oficial:** Las skills externas fueron instaladas directamente usando los repositorios oficiales mediante `npx skills`.
+- **Integridad:** Las firmas y hashes locales se mantienen en `skills-lock.json`.
+- **Auditoría:** Se ha comprobado explícitamente que las licencias de código abierto (Apache-2.0 y MIT) permiten su uso y modificación en el contexto de este proyecto (SaaS NexoKids).

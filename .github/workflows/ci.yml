@@ -50,10 +50,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+      - name: Setup Node and pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
       - name: Start Supabase DB and Run Tests
         run: |
-          supabase db start
-          supabase db lint --level error
-          supabase db test
+          pnpm exec supabase start
+          pnpm exec supabase db lint --level error
+          pnpm exec supabase test db
+        if: always()

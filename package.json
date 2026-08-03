@@ -16,6 +16,11 @@
     "supabase:init": "supabase init"
   },
   "devDependencies": {
-    "supabase": "^2.15.8"
+    "supabase": "1.183.5"
+  },
+  "pnpm": {
+    "approvedBuilds": [
+      "supabase"
+    ]
   }
 }
