@@ -17,21 +17,33 @@ SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111
 SELECT is_empty('SELECT id FROM public.organization_members WHERE organization_id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', 'Owner A no ve miembros de B');
 
 -- 4. actualización cruzada afecta cero filas y B permanece sin cambios
-WITH updated AS (
-  UPDATE public.organizations SET name = 'Hack' WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
-  RETURNING id
-)
-SELECT results_eq('SELECT count(*) FROM updated', $$VALUES (0::bigint)$$, 'Actualización cruzada afecta cero filas');
+SELECT results_eq(
+  $$
+    WITH updated AS (
+      UPDATE public.organizations SET name = 'Hack' WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      RETURNING id
+    )
+    SELECT count(*) FROM updated
+  $$,
+  $$VALUES (0::bigint)$$,
+  'Actualización cruzada afecta cero filas'
+);
 SELECT set_config('role', 'postgres', true);
 SELECT results_eq('SELECT name FROM public.organizations WHERE id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', $$VALUES ('Organización B')$$, 'El dato original sigue intacto tras UPDATE');
 SELECT set_config('role', 'authenticated', true);
 
 -- 5. eliminación cruzada afecta cero filas y B permanece existente
-WITH deleted AS (
-  DELETE FROM public.organizations WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
-  RETURNING id
-)
-SELECT results_eq('SELECT count(*) FROM deleted', $$VALUES (0::bigint)$$, 'Eliminación cruzada afecta cero filas');
+SELECT results_eq(
+  $$
+    WITH deleted AS (
+      DELETE FROM public.organizations WHERE id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      RETURNING id
+    )
+    SELECT count(*) FROM deleted
+  $$,
+  $$VALUES (0::bigint)$$,
+  'Eliminación cruzada afecta cero filas'
+);
 SELECT set_config('role', 'postgres', true);
 SELECT results_eq('SELECT name FROM public.organizations WHERE id = ''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''', $$VALUES ('Organización B')$$, 'El dato original sigue intacto tras DELETE');
 SELECT set_config('role', 'authenticated', true);
