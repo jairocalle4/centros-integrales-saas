@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CentrosIntegrales.Billing.Api/CentrosIntegrales.Billing.Api.csproj" />
+    <Project Path="src/CentrosIntegrales.Billing.Application/CentrosIntegrales.Billing.Application.csproj" />
+    <Project Path="src/CentrosIntegrales.Billing.Domain/CentrosIntegrales.Billing.Domain.csproj" />
+    <Project Path="src/CentrosIntegrales.Billing.Infrastructure/CentrosIntegrales.Billing.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CentrosIntegrales.Billing.IntegrationTests/CentrosIntegrales.Billing.IntegrationTests.csproj" />
+    <Project Path="tests/CentrosIntegrales.Billing.UnitTests/CentrosIntegrales.Billing.UnitTests.csproj" />
+  </Folder>
+</Solution>

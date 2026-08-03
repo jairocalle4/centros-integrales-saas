@@ -1,0 +1,21 @@
+{
+  "name": "centros-integrales-saas",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.0.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "build:web": "pnpm --filter web build",
+    "lint": "pnpm --recursive lint",
+    "format:check": "pnpm --recursive format:check",
+    "typecheck": "pnpm --recursive typecheck",
+    "test:web": "pnpm --filter web test",
+    "test:db": "supabase test db",
+    "test:billing": "dotnet test services/electronic-billing/tests/CentrosIntegrales.Billing.UnitTests/CentrosIntegrales.Billing.UnitTests.csproj",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test:web && pnpm test:billing",
+    "supabase:init": "supabase init"
+  },
+  "devDependencies": {
+    "supabase": "^2.15.8"
+  }
+}

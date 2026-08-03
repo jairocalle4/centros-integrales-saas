@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  web-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint and Typecheck
+        run: |
+          pnpm lint
+          pnpm typecheck
+      - name: Test Web
+        run: pnpm test:web
+      - name: Build Web
+        run: pnpm build:web
+
+  dotnet-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore dependencies
+        run: dotnet restore services/electronic-billing
+      - name: Build
+        run: dotnet build services/electronic-billing --no-restore
+      - name: Test
+        run: dotnet test services/electronic-billing --no-build --verbosity normal
+
+  supabase-rls-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+      - name: Start Supabase DB and Run Tests
+        run: |
+          supabase db start
+          supabase db lint --level error
+          supabase db test

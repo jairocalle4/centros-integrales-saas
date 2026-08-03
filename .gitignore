@@ -1,0 +1,36 @@
+# Dependencias Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Secretos y Entornos Reales
+.env
+.env.*
+!.env.example
+
+# Archivos de la nube y CLI
+.supabase/
+.vercel/
+
+# Logs y Diagnósticos
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Certificados y Archivos del SRI
+*.p12
+*.pfx
+*.pem
+*.key
+*.xml
+*.pdf
+/docs/sri-real-data/
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/

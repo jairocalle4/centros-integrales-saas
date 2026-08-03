@@ -1,0 +1,6 @@
+@CentrosIntegrales.Billing.Api_HostAddress = http://localhost:5223
+
+GET {{CentrosIntegrales.Billing.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
