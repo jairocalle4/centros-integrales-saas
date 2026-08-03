@@ -11,8 +11,8 @@
     "typecheck": "pnpm --recursive typecheck",
     "test:web": "pnpm --filter web test",
     "test:db": "supabase test db",
-    "test:billing": "dotnet test services/electronic-billing/tests/CentrosIntegrales.Billing.UnitTests/CentrosIntegrales.Billing.UnitTests.csproj",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test:web && pnpm test:billing",
+    "test:billing": "dotnet test services/electronic-billing -c Release",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test:web && pnpm build:web && pnpm test:billing",
     "supabase:init": "supabase init"
   },
   "devDependencies": {
