@@ -1,2 +1,2 @@
-git commit -a -m "fix: use is instead of results_eq for pgTAP CTE assertions"
+git commit -a -m "fix: correct expected errors for trigger exceptions"
 git push

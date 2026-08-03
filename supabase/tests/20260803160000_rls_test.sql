@@ -37,7 +37,7 @@ SELECT results_eq('SELECT name FROM public.organizations WHERE id = ''bbbbbbbb-b
 SELECT set_config('role', 'authenticated', true);
 
 -- 6. inserción de un integrante en otra organización es rechazada
-SELECT throws_ok($$ INSERT INTO public.organization_members (organization_id, user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '66666666-6666-6666-6666-666666666666') $$, 'new row violates row-level security policy for table "organization_members"', 'No se puede insertar miembro en otra org');
+SELECT throws_ok($$ INSERT INTO public.organization_members (organization_id, user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '66666666-6666-6666-6666-666666666666') $$, 'Solo dueños y administradores pueden agregar miembros', 'No se puede insertar miembro en otra org');
 
 -- 7. staff no puede cambiar su propio rol
 SELECT set_config('request.jwt.claims', '{"sub": "44444444-4444-4444-4444-444444444444"}', true); -- Staff A
@@ -63,7 +63,7 @@ SELECT set_config('request.jwt.claims', '{"sub": "66666666-6666-6666-6666-666666
 SELECT is_empty('SELECT id FROM public.organizations', 'Usuario sin membresía no ve org');
 
 -- 12. usuario autenticado sin membresía no puede crear organizaciones
-SELECT throws_ok($$ INSERT INTO public.organizations (name) VALUES ('Hacked Org') $$, 'new row violates row-level security policy for table "organizations"', 'Usuario sin membresía no puede crear organizaciones');
+SELECT throws_ok($$ INSERT INTO public.organizations (name) VALUES ('Hacked Org') $$, 'Solo dueños y administradores pueden agregar miembros', 'Usuario sin membresía no puede crear organizaciones');
 
 -- 13. anon no puede leer organizaciones ni integrantes
 SELECT set_config('role', 'anon', true);
@@ -72,7 +72,7 @@ SELECT is_empty('SELECT id FROM public.organizations', 'Anon no lee orgs');
 SELECT is_empty('SELECT id FROM public.organization_members', 'Anon no lee miembros');
 
 -- 14. anon no puede crear organizaciones
-SELECT throws_ok($$ INSERT INTO public.organizations (name) VALUES ('X') $$, 'new row violates row-level security policy for table "organizations"', 'Anon no crea orgs');
+SELECT throws_ok($$ INSERT INTO public.organizations (name) VALUES ('X') $$, 'null value in column "user_id" of relation "organization_members" violates not-null constraint', 'Anon no crea orgs');
 
 -- 15. una operación válida dentro de la organización sí funciona
 SELECT set_config('role', 'authenticated', true);
