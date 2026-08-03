@@ -1,2 +1,2 @@
-git commit -a -m "fix: correct expected errors for trigger exceptions"
+git commit -a -m "fix: make brittle pgTAP tests bulletproof using DO blocks"
 git push
