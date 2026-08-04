@@ -11,6 +11,7 @@ import { RecoverPassword } from './features/auth/RecoverPassword';
 import { ResetPassword } from './features/auth/ResetPassword';
 import { UserLayout } from './layouts/UserLayout';
 import { Dashboard } from './features/organizations/Dashboard';
+import { AcceptInvitation } from './features/organizations/AcceptInvitation';
 import App from './App';
 
 const queryClient = new QueryClient();
@@ -31,6 +32,7 @@ createRoot(document.getElementById('root')!).render(
 
             {/* Protected routes */}
             <Route element={<RequireAuth />}>
+              <Route path="/accept-invite" element={<AcceptInvitation />} />
               <Route path="/app" element={<UserLayout />}>
                 <Route index element={<Dashboard />} />
               </Route>

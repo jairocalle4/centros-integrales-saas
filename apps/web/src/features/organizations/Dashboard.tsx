@@ -28,11 +28,10 @@ const inviteSchema = z.object({
 });
 type InviteForm = z.infer<typeof inviteSchema>;
 
-import { useAuth } from '../auth/AuthProvider';
 
 export function Dashboard() {
   const { currentOrg, organizations, isLoading, refreshOrgs } = useOrg();
-  const { user } = useAuth();
+  // removed unused user from useAuth
   const [members, setMembers] = useState<Member[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -99,17 +98,22 @@ export function Dashboard() {
 
   const onInvite = async (data: InviteForm) => {
     if (!currentOrg) return;
-    const { error } = await supabase.from('invitations').insert({
-      organization_id: currentOrg.id,
-      email: data.email,
-      role: data.role as any,
-      invited_by: user!.id,
+    
+    // Invocamos la Edge Function para procesar la invitación de forma segura
+    const { error } = await supabase.functions.invoke('invite-user', {
+      body: {
+        organization_id: currentOrg.id,
+        email: data.email,
+        role: data.role,
+      }
     });
     
     if (!error) {
-      alert('Invitación enviada (Simulada).');
+      alert('Invitación procesada exitosamente.');
       setIsInviting(false);
       resetInvite();
+      // Opcionalmente recargar miembros si queremos ver los invitados pendientes, 
+      // pero por ahora solo se listan miembros activos (status = active).
     } else {
       alert('Error enviando invitación: ' + error.message);
     }
