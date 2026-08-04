@@ -86,6 +86,8 @@ export type Database = {
       }
       invitations: {
         Row: {
+          accepted_at: string | null
+          accepted_by: string | null
           created_at: string
           email: string
           expires_at: string
@@ -94,8 +96,11 @@ export type Database = {
           organization_id: string
           role: Database["public"]["Enums"]["organization_role"]
           status: string
+          token_hash: string
         }
         Insert: {
+          accepted_at?: string | null
+          accepted_by?: string | null
           created_at?: string
           email: string
           expires_at?: string
@@ -104,8 +109,11 @@ export type Database = {
           organization_id: string
           role?: Database["public"]["Enums"]["organization_role"]
           status?: string
+          token_hash: string
         }
         Update: {
+          accepted_at?: string | null
+          accepted_by?: string | null
           created_at?: string
           email?: string
           expires_at?: string
@@ -114,6 +122,7 @@ export type Database = {
           organization_id?: string
           role?: Database["public"]["Enums"]["organization_role"]
           status?: string
+          token_hash?: string
         }
         Relationships: [
           {
@@ -289,6 +298,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_invitation: { Args: { p_token: string }; Returns: string }
+      create_invitation: {
+        Args: {
+          p_email: string
+          p_organization_id: string
+          p_role: Database["public"]["Enums"]["organization_role"]
+        }
+        Returns: string
+      }
       create_organization: { Args: { org_name: string }; Returns: string }
       has_organization_role: {
         Args: {
