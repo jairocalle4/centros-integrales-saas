@@ -1,6 +1,18 @@
 BEGIN;
 SELECT plan(20);
 
+CREATE OR REPLACE FUNCTION pg_temp.throws_any(command text)
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  EXECUTE command;
+  RETURN false;
+EXCEPTION WHEN OTHERS THEN
+  RETURN true;
+END;
+$$;
+
 -- Preparativos
 SELECT set_config('role', 'authenticated', true);
 
@@ -41,14 +53,12 @@ SELECT results_eq('SELECT name FROM public.organizations WHERE id = ''bbbbbbbb-b
 SELECT set_config('role', 'authenticated', true);
 
 -- 8. inserción de un integrante en otra organización es rechazada
-DO $test$
-BEGIN
-  INSERT INTO public.organization_members (organization_id, user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '66666666-6666-6666-6666-666666666666');
-  RAISE EXCEPTION 'Failed: Should have thrown an exception';
-EXCEPTION WHEN OTHERS THEN
-END;
-$test$;
-SELECT pass('No se puede insertar miembro en otra org');
+SELECT ok(
+  pg_temp.throws_any($sql$
+    INSERT INTO public.organization_members (organization_id, user_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '66666666-6666-6666-6666-666666666666');
+  $sql$),
+  'No se puede insertar miembro en otra org'
+);
 
 -- 9. staff no puede cambiar su propio rol
 SELECT set_config('request.jwt.claims', '{"sub": "44444444-4444-4444-4444-444444444444"}', true); -- Staff A
@@ -76,14 +86,12 @@ SELECT set_config('request.jwt.claims', '{"sub": "66666666-6666-6666-6666-666666
 SELECT is_empty('SELECT id FROM public.organizations', 'Usuario sin membresía no ve org');
 
 -- 15. usuario autenticado sin membresía no puede crear organizaciones
-DO $test$
-BEGIN
-  INSERT INTO public.organizations (name) VALUES ('Hacked Org');
-  RAISE EXCEPTION 'Failed: Should have thrown an exception';
-EXCEPTION WHEN OTHERS THEN
-END;
-$test$;
-SELECT pass('Usuario sin membresía no puede crear organizaciones');
+SELECT ok(
+  pg_temp.throws_any($sql$
+    INSERT INTO public.organizations (name) VALUES ('Hacked Org');
+  $sql$),
+  'Usuario sin membresía no puede crear organizaciones'
+);
 
 -- 16. anon no puede leer organizaciones ni integrantes
 SELECT set_config('role', 'anon', true);
@@ -94,14 +102,12 @@ SELECT is_empty('SELECT id FROM public.organizations', 'Anon no lee orgs');
 SELECT is_empty('SELECT id FROM public.organization_members', 'Anon no lee miembros');
 
 -- 18. anon no puede crear organizaciones
-DO $test$
-BEGIN
-  INSERT INTO public.organizations (name) VALUES ('X');
-  RAISE EXCEPTION 'Failed: Should have thrown an exception';
-EXCEPTION WHEN OTHERS THEN
-END;
-$test$;
-SELECT pass('Anon no crea orgs');
+SELECT ok(
+  pg_temp.throws_any($sql$
+    INSERT INTO public.organizations (name) VALUES ('X');
+  $sql$),
+  'Anon no crea orgs'
+);
 
 -- 19. una operación válida dentro de la organización sí funciona
 SELECT set_config('role', 'authenticated', true);

@@ -23,14 +23,10 @@ INSERT INTO public.profiles (id, first_name, last_name) VALUES
 ('66666666-6666-6666-6666-666666666666', 'Unauth', 'User')
 ON CONFLICT (id) DO NOTHING;
 
-ALTER TABLE public.organizations DISABLE TRIGGER assign_owner_on_organization_create;
-
 INSERT INTO public.organizations (id, name) VALUES
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Organización A'),
 ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Organización B')
 ON CONFLICT (id) DO NOTHING;
-
-ALTER TABLE public.organizations ENABLE TRIGGER assign_owner_on_organization_create;
 
 INSERT INTO public.organization_members (organization_id, user_id, role, status) VALUES
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', 'owner', 'active'),
