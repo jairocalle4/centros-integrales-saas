@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // En producción debería estar restringido a la URL del frontend
+  'Access-Control-Allow-Origin': 'http://localhost:5174', // Origen estricto para desarrollo
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
@@ -60,9 +60,10 @@ serve(async (req) => {
       global: { headers: { Authorization: authHeader } }
     });
 
-    const { data: { user }, error: userError } = await authClient.auth.getUser();
+    const jwt = authHeader.replace('Bearer ', '').trim();
+    const { data: { user }, error: userError } = await authClient.auth.getUser(jwt);
     if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+      return new Response(JSON.stringify({ error: 'Unauthorized: ' + (userError?.message || 'No user') }), { 
         status: 401, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
@@ -90,7 +91,7 @@ serve(async (req) => {
 
     // 3. Preparar clientes y URL de redirección
     // Configurar redirectUrl basándose en una variable de entorno segura o valor por defecto
-    const siteUrl = Deno.env.get('SITE_URL') || 'http://localhost:5173';
+    const siteUrl = Deno.env.get('SITE_URL') || 'http://localhost:5174';
     const redirectUrl = `${siteUrl}/accept-invite?token=${token}`;
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -135,7 +136,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Unexpected error:', error);
     return new Response(
-      JSON.stringify({ error: 'Internal Server Error' }),
+      JSON.stringify({ error: error.message || 'Internal Server Error', stack: error.stack }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }

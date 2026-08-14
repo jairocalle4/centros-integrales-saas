@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import toast from 'react-hot-toast';
+import { ElectronicBillingSettings } from '../billing/ElectronicBillingSettings';
 
 type Member = {
   id: string;
@@ -88,11 +90,12 @@ export function Dashboard() {
     const { error } = await supabase.rpc('create_organization', { org_name: data.name });
     
     if (!error) {
+      toast.success('Organización creada exitosamente.');
       setIsCreating(false);
       reset();
       await refreshOrgs();
     } else {
-      alert('Error creando organización: ' + error.message);
+      toast.error('Error creando organización: ' + error.message);
     }
   };
 
@@ -109,13 +112,22 @@ export function Dashboard() {
     });
     
     if (!error) {
-      alert('Invitación procesada exitosamente.');
+      toast.success('Invitación procesada exitosamente.');
       setIsInviting(false);
       resetInvite();
       // Opcionalmente recargar miembros si queremos ver los invitados pendientes, 
       // pero por ahora solo se listan miembros activos (status = active).
     } else {
-      alert('Error enviando invitación: ' + error.message);
+      let errorMsg = error.message;
+      if (error.context && typeof error.context === 'object') {
+         // Si es un FunctionsHttpError, tratamos de sacar el body
+         try {
+           const body = await (error.context as any).text();
+           const parsed = JSON.parse(body);
+           errorMsg = parsed.error || body;
+         } catch(e) {}
+      }
+      toast.error('Error enviando invitación: ' + errorMsg);
     }
   };
 
@@ -126,30 +138,16 @@ export function Dashboard() {
   if (organizations.length === 0) {
     return (
       <div className="mx-auto max-w-md mt-10">
-        <div className="bg-white p-8 rounded-lg shadow-sm border border-gray-100">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">¡Bienvenido!</h2>
-          <p className="text-gray-600 mb-6 text-center">
-            Para comenzar, necesitas crear una organización.
+        <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200 text-center">
+          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Sin Organización Asignada</h2>
+          <p className="text-gray-600 text-sm leading-relaxed mb-4">
+            No tienes acceso a ningún centro registrado actualmente. Para acceder, debes recibir una invitación del dueño o administrador de tu centro integral.
           </p>
-          
-          <form onSubmit={handleSubmit(onCreateOrg)} className="space-y-4">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">Nombre de la organización</label>
-              <input 
-                id="name"
-                {...register('name')}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border" 
-              />
-              {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>}
-            </div>
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400"
-            >
-              {isSubmitting ? 'Creando...' : 'Crear Organización'}
-            </button>
-          </form>
         </div>
       </div>
     );
@@ -163,14 +161,6 @@ export function Dashboard() {
           <p className="mt-2 text-sm text-gray-700">
             Gestiona los miembros y configuraciones de esta organización.
           </p>
-        </div>
-        <div className="mt-4 sm:mt-0">
-          <button
-            onClick={() => setIsCreating(true)}
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto"
-          >
-            Nueva Organización
-          </button>
         </div>
       </div>
 
@@ -284,6 +274,12 @@ export function Dashboard() {
           )}
         </div>
       </div>
+      
+      {currentOrg && (
+        <div className="mt-8">
+          <ElectronicBillingSettings orgId={currentOrg.id} />
+        </div>
+      )}
     </div>
   );
 }

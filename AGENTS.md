@@ -23,3 +23,6 @@ Bienvenido, agente de IA. Al trabajar en este repositorio, debes acatar estas re
 ## 5. Arquitectura General
 - No realizar despliegues o acciones sobre producción sin autorización explícita.
 - No incorporar código del ERP FastStore por copia masiva; solo extraer estratégicamente refactorizando para .NET 10.
+
+## 6. Skills Obligatorias (Regla 00-mandatory-skills)
+- Es imperativo acatar la Workspace Rule `.agents/rules/00-mandatory-skills.md` antes de procesar solicitudes. Las skills de dominio, base de datos y UI/UX deben ser leídas completamente en cada contexto nuevo.

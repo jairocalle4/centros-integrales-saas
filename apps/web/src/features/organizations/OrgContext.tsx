@@ -6,6 +6,11 @@ import { useAuth } from '../auth/AuthProvider';
 export type Organization = {
   id: string;
   name: string;
+  ruc?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  email?: string | null;
 };
 
 interface OrgContextType {
@@ -13,6 +18,7 @@ interface OrgContextType {
   setCurrentOrg: (org: Organization) => void;
   organizations: Organization[];
   isLoading: boolean;
+  isActive: boolean | null;
   refreshOrgs: () => Promise<void>;
 }
 
@@ -20,9 +26,18 @@ const OrgContext = createContext<OrgContextType | undefined>(undefined);
 
 export function OrgProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
-  const [currentOrg, setCurrentOrg] = useState<Organization | null>(null);
+  const [currentOrg, setCurrentOrg] = useState<Organization | null>(() => {
+    const saved = localStorage.getItem('nexo_current_org_data');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return null;
+  });
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!currentOrg);
+  const [isActive, setIsActive] = useState<boolean | null>(null);
 
   const fetchOrgs = async () => {
     if (!session) return;
@@ -32,7 +47,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // The policy "Members can view their organization" ensures we only see what we have access to.
     const { data, error } = await supabase
       .from('organizations')
-      .select('id, name')
+      .select('*')
       .order('created_at', { ascending: false });
 
     if (!error && data) {
@@ -49,12 +64,32 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    fetchOrgs();
-  }, [session]);
+    if (session && !currentOrg) {
+      fetchOrgs();
+    }
+  }, [session, currentOrg]);
+
+  useEffect(() => {
+    async function checkActive() {
+      if (!currentOrg) {
+        setIsActive(null);
+        return;
+      }
+      // Check if it's active
+      const { data, error } = await supabase.rpc('is_organization_active', {
+        p_org_id: currentOrg.id
+      });
+      if (!error) {
+        setIsActive(!!data);
+      }
+    }
+    checkActive();
+  }, [currentOrg]);
 
   const handleSetCurrentOrg = (org: Organization) => {
     setCurrentOrg(org);
-    localStorage.setItem('nexo_current_org_id', org.id);
+    localStorage.setItem('nexo_current_org_id', org.id); // Keep for legacy
+    localStorage.setItem('nexo_current_org_data', JSON.stringify(org));
   };
 
   return (
@@ -63,6 +98,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setCurrentOrg: handleSetCurrentOrg, 
       organizations, 
       isLoading,
+      isActive,
       refreshOrgs: fetchOrgs 
     }}>
       {children}

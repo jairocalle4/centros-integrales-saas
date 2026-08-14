@@ -35,17 +35,44 @@ export function AcceptInvitation() {
     // Process the invitation
     const processInvitation = async () => {
       setStatus('loading');
-      const { error } = await supabase.rpc('accept_invitation', { p_token: token });
+      
+      const { data, error } = await supabase.rpc('accept_invitation', { p_token: token });
       
       if (error) {
         setStatus('error');
         setErrorMessage(error.message);
       } else {
         setStatus('success');
+        
+        // Fetch organization name and user role
+        let orgName = '';
+        let userRole = 'staff';
+        
+        // data from rpc is the orgId
+        if (data) {
+          try {
+            const [{ data: org }, { data: member }] = await Promise.all([
+              supabase.from('organizations').select('name').eq('id', data).single(),
+              supabase.from('organization_members').select('role').eq('organization_id', data).eq('user_id', session.user.id).single()
+            ]);
+            if (org) orgName = (org as any).name;
+            if (member) userRole = (member as any).role;
+          } catch (e) {
+            console.error('Error fetching org info:', e);
+          }
+        }
+
         // Wait a brief moment and redirect to app
         setTimeout(() => {
-          // Force a hard navigation to reload org context or just redirect
-          window.location.href = '/app';
+          navigate('/reset-password', { 
+            replace: true, 
+            state: { 
+              isFirstTime: true,
+              orgId: data,
+              orgName,
+              userRole
+            } 
+          });
         }, 2000);
       }
     };

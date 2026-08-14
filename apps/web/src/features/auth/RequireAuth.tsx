@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { useAuth } from './AuthProvider';
+import { supabase } from '../../lib/supabase';
 
 export function RequireAuth() {
   const { session, isLoading } = useAuth();
@@ -17,10 +19,6 @@ export function RequireAuth() {
   }
 
   if (!session) {
-    // Redirect them to the /login page, but save the current location they were
-    // trying to go to when they were redirected. This allows us to send them
-    // along to that page after they login, which is a nicer user experience
-    // than dropping them off on the home page.
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -29,8 +27,24 @@ export function RequireAuth() {
 
 export function RequireUnauth() {
   const { session, isLoading } = useAuth();
+  const [targetPath, setTargetPath] = useState<string | null>(null);
+  const [checkingAdmin, setCheckingAdmin] = useState(false);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (session) {
+      setCheckingAdmin(true);
+      supabase.rpc('is_platform_admin').then(({ data }) => {
+        if (data) {
+          setTargetPath('/admin');
+        } else {
+          setTargetPath('/app');
+        }
+        setCheckingAdmin(false);
+      });
+    }
+  }, [session]);
+
+  if (isLoading || (session && (checkingAdmin || !targetPath))) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center space-y-4">
@@ -41,8 +55,8 @@ export function RequireUnauth() {
     );
   }
 
-  if (session) {
-    return <Navigate to="/app" replace />;
+  if (session && targetPath) {
+    return <Navigate to={targetPath} replace />;
   }
 
   return <Outlet />;
