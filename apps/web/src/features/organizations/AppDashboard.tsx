@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
+import { formatDateWithWeekday } from '../../lib/formatDate';
+import { Skeleton, SkeletonCards } from '../../components/ui/Skeleton';
 import {
   Users,
   CalendarCheck,
@@ -34,6 +36,7 @@ type RecentCharge = {
   amount: number;
   status: string;
   due_date: string | null;
+  beneficiary_id: string | null;
   beneficiary_name: string;
 };
 
@@ -78,7 +81,7 @@ export function AppDashboard() {
           .eq('status', 'present'),
         supabase
           .from('charges')
-          .select('id, description, amount, status, due_date, beneficiary_id')
+          .select('id, description, amount, status, due_date, beneficiary_id, internal_payments(amount)')
           .eq('organization_id', currentOrg.id)
           .in('status', ['pending', 'partial'])
           .order('due_date', { ascending: true })
@@ -111,7 +114,13 @@ export function AppDashboard() {
         }
       }
 
-      const pendingTotal = charges.reduce((acc: number, c: any) => acc + (c.amount || 0), 0);
+      // "Pendiente" means the outstanding balance, not the full charge —
+      // a partially-paid charge should only count what's left to collect.
+      const remainingOf = (c: any) => {
+        const paid = (c.internal_payments || []).reduce((s: number, p: any) => s + (p.amount || 0), 0);
+        return Math.max(0, (c.amount || 0) - paid);
+      };
+      const pendingTotal = charges.reduce((acc: number, c: any) => acc + remainingOf(c), 0);
       const cobradoMes = (paymentsData || []).reduce(
         (acc: number, p: any) => acc + (p.amount || 0),
         0
@@ -130,9 +139,10 @@ export function AppDashboard() {
         charges.map((c: any) => ({
           id: c.id,
           description: c.description,
-          amount: c.amount,
+          amount: remainingOf(c),
           status: c.status,
           due_date: c.due_date,
+          beneficiary_id: c.beneficiary_id || null,
           beneficiary_name: benMap[c.beneficiary_id] || 'Sin beneficiario',
         }))
       );
@@ -165,12 +175,7 @@ export function AppDashboard() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{currentOrg.name}</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            {new Date().toLocaleDateString('es-EC', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-            })}
+            {formatDateWithWeekday(new Date())}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -186,11 +191,7 @@ export function AppDashboard() {
 
       {/* KPIs */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-slate-200 p-5 animate-pulse h-28" />
-          ))}
-        </div>
+        <SkeletonCards count={4} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
@@ -249,7 +250,17 @@ export function AppDashboard() {
               </Link>
             </div>
             {loading ? (
-              <div className="p-8 text-center text-slate-400 animate-pulse text-xs">Cargando...</div>
+              <div className="p-4 space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="space-y-1.5 flex-1">
+                      <Skeleton className="h-3 w-2/3" />
+                      <Skeleton className="h-2.5 w-1/3" />
+                    </div>
+                    <Skeleton className="h-3 w-10 ml-3" />
+                  </div>
+                ))}
+              </div>
             ) : recentCharges.length === 0 ? (
               <div className="p-8 text-center text-slate-400">
                 <CheckCircle className="w-9 h-9 text-emerald-400 mx-auto mb-2" />
@@ -257,20 +268,41 @@ export function AppDashboard() {
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {recentCharges.map((charge) => (
-                  <div key={charge.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
-                    <div className="min-w-0 pr-2">
-                      <p className="text-xs font-bold text-slate-900 truncate">{charge.description}</p>
-                      <p className="text-[11px] text-slate-500 truncate">{charge.beneficiary_name}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-extrabold text-slate-900">${charge.amount.toFixed(2)}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor(charge.status)}`}>
-                        {statusLabel(charge.status)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                {recentCharges.map((charge) => {
+                  const content = (
+                    <>
+                      <div className="min-w-0 pr-2">
+                        <p className="text-xs font-bold text-slate-900 truncate">{charge.description}</p>
+                        <p className="text-[11px] text-slate-500 truncate">{charge.beneficiary_name}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-extrabold text-slate-900">${charge.amount.toFixed(2)}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor(charge.status)}`}>
+                          {statusLabel(charge.status)}
+                        </span>
+                      </div>
+                    </>
+                  );
+                  return charge.beneficiary_id ? (
+                    <Link
+                      key={charge.id}
+                      to={`/app/beneficiarios/${charge.beneficiary_id}`}
+                      className="flex items-center justify-between px-4 py-3 hover:bg-indigo-50 transition-colors cursor-pointer"
+                      title="Ver beneficiario y cobrar"
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <Link
+                      key={charge.id}
+                      to="/app/cobros"
+                      className="flex items-center justify-between px-4 py-3 hover:bg-indigo-50 transition-colors cursor-pointer"
+                      title="Ir a Cobros y Servicios"
+                    >
+                      {content}
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>

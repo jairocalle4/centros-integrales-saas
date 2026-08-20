@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
@@ -13,6 +14,7 @@ import {
   Mail,
   HeartHandshake,
 } from 'lucide-react';
+import { SkeletonTable } from '../../components/ui/Skeleton';
 
 type Representative = {
   id: string;
@@ -30,10 +32,12 @@ type Representative = {
 
 export function RepresentantesModule() {
   const { currentOrg } = useOrg();
+  const navigate = useNavigate();
   const [representatives, setRepresentatives] = useState<Representative[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showInactive, setShowInactive] = useState(false);
+  const [handledEditParam, setHandledEditParam] = useState(false);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -105,6 +109,24 @@ export function RepresentantesModule() {
     setIsActive(rep.is_active);
     setIsModalOpen(true);
   };
+
+  // Deep link from the payment-receipt "Sin WhatsApp" fallback
+  // (?edit=<representativeId>) — jump straight into the edit form instead
+  // of a bare list, same query-param-prefill idea used in MatriculaWizard.
+  useEffect(() => {
+    if (loading || handledEditParam) return;
+    setHandledEditParam(true);
+    const editId = new URLSearchParams(window.location.search).get('edit');
+    if (!editId) return;
+    const rep = representatives.find(r => r.id === editId);
+    if (rep) {
+      handleOpenEditModal(rep);
+    } else {
+      toast.error('No se encontró el representante a editar.');
+    }
+    navigate('/app/representantes', { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, representatives, handledEditParam]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -237,7 +259,7 @@ export function RepresentantesModule() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 animate-pulse">Cargando representantes...</div>
+          <SkeletonTable rows={6} columns={4} />
         ) : filteredReps.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
             <HeartHandshake className="w-12 h-12 text-slate-300 mx-auto mb-3" />

@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useOrg } from './OrgContext';
 import toast from 'react-hot-toast';
 import { X, PackageOpen, Tag } from 'lucide-react';
+import { SkeletonTable } from '../../components/ui/Skeleton';
 
 type Service = {
   id: string;
@@ -131,7 +132,7 @@ export function ServiciosList({
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 animate-pulse">Cargando catálogo...</div>
+          <SkeletonTable rows={5} columns={3} />
         ) : services.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
             <PackageOpen className="w-12 h-12 text-slate-300 mx-auto mb-3" />

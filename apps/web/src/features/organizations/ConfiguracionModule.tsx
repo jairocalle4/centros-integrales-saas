@@ -6,7 +6,7 @@ import { ElectronicBillingSettings } from '../billing/ElectronicBillingSettings'
 import { Building2, Save, MapPin, Phone, Mail, FileText, ShieldCheck } from 'lucide-react';
 
 export function ConfiguracionModule() {
-  const { currentOrg, refreshOrgs } = useOrg();
+  const { currentOrg, refreshOrgs, hasElectronicBilling } = useOrg();
   const [activeTab, setActiveTab] = useState<'general' | 'sri'>('general');
 
   const [name, setName] = useState('');
@@ -233,7 +233,7 @@ export function ConfiguracionModule() {
       {/* TAB 2: SRI Electronic Billing Settings */}
       {activeTab === 'sri' && (
         <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-          <ElectronicBillingSettings orgId={currentOrg.id} />
+          <ElectronicBillingSettings orgId={currentOrg.id} hasElectronicBilling={hasElectronicBilling} />
         </div>
       )}
     </div>

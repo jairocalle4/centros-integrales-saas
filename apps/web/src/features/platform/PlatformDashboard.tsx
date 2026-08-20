@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../auth/AuthProvider';
 import toast from 'react-hot-toast';
+import { formatDate } from '../../lib/formatDate';
 
 type Organization = {
   id: string;
@@ -116,6 +117,10 @@ export function PlatformDashboard() {
   });
   const [isSubmittingPlan, setIsSubmittingPlan] = useState(false);
 
+  // Platform-wide Settings (IVA, etc.)
+  const [ivaPercentage, setIvaPercentage] = useState<number>(15);
+  const [savingSettings, setSavingSettings] = useState(false);
+
 
 
   useEffect(() => {
@@ -135,6 +140,16 @@ export function PlatformDashboard() {
       };
       fetchProfileData();
     }
+
+    const loadPlatformSettings = async () => {
+      const { data } = await supabase
+        .from('platform_settings')
+        .select('iva_percentage')
+        .eq('id', true)
+        .maybeSingle();
+      if (data) setIvaPercentage(Number(data.iva_percentage));
+    };
+    loadPlatformSettings();
   }, [user]);
 
   const fetchData = async () => {
@@ -270,6 +285,23 @@ export function PlatformDashboard() {
       toast.error('Error actualizando perfil: ' + error.message);
     } else {
       toast.success('Perfil actualizado correctamente.');
+    }
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const { error } = await supabase
+        .from('platform_settings')
+        .update({ iva_percentage: ivaPercentage })
+        .eq('id', true);
+      if (error) throw error;
+      toast.success('Configuración de plataforma guardada.');
+    } catch (err: any) {
+      toast.error('Error guardando configuración: ' + err.message);
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -419,6 +451,7 @@ export function PlatformDashboard() {
             activeTab === 'tenants' ? 'Centros Integrales' :
             activeTab === 'plans' ? 'Planes & Licencias' :
             activeTab === 'audit' ? 'Auditoría' :
+            activeTab === 'settings' ? 'Configuración de Plataforma' :
             activeTab === 'profile' ? 'Mi Perfil & Config.' : 'Dashboard General'
           }
         </h1>
@@ -781,11 +814,7 @@ export function PlatformDashboard() {
                             </div>
                           </td>
                           <td className="px-6 py-4 text-slate-500 text-xs">
-                            {new Date(org.created_at).toLocaleDateString('es-EC', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                            })}
+                            {formatDate(org.created_at)}
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
@@ -1087,13 +1116,7 @@ export function PlatformDashboard() {
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-xs text-slate-500 font-mono">
-                                {new Date(inv.created_at).toLocaleDateString('es-EC', {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                                {formatDate(inv.created_at)}, {new Date(inv.created_at).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })}
                               </td>
                               <td className="px-6 py-4 text-right">
                                 {inv.status === 'pending' && (
@@ -1325,12 +1348,50 @@ export function PlatformDashboard() {
                         </div>
                       </div>
                       <span className="text-xs text-slate-400 font-mono">
-                        {new Date(adm.created_at).toLocaleDateString('es-EC')}
+                        {formatDate(adm.created_at)}
                       </span>
                     </div>
                   );
                 })}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* PESTAÑA 5: Configuración de la Plataforma */}
+        {activeTab === 'settings' && (
+          <div className="space-y-8">
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs max-w-md">
+              <h2 className="text-lg font-bold text-slate-900 mb-1">Impuestos</h2>
+              <p className="text-sm text-slate-500 mb-4">
+                Porcentaje de IVA usado como referencia para la facturación electrónica.
+                Por ahora los montos se registran ya incluyendo IVA — este valor todavía
+                no se aplica automáticamente en ningún cálculo.
+              </p>
+
+              <form onSubmit={handleSaveSettings} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Porcentaje de IVA (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={ivaPercentage}
+                    onChange={(e) => setIvaPercentage(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {savingSettings ? 'Guardando...' : 'Guardar Configuración'}
+                </button>
+              </form>
             </div>
           </div>
         )}

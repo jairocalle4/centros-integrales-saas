@@ -6,38 +6,43 @@ import {
   CheckCircle,
   Baby,
   Users,
-  DollarSign,
   ArrowRight,
   ArrowLeft,
-  Search,
   Save,
   Plus,
   Trash2,
   GraduationCap,
   FileText,
-  UserPlus,
-  Search as SearchIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ActaCompromisoModal } from './ActaCompromisoModal';
 import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
+import { formatDate } from '../../lib/formatDate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-const DAYS = [
-  { value: 1, label: 'Lunes' },
-  { value: 2, label: 'Martes' },
-  { value: 3, label: 'Miércoles' },
-  { value: 4, label: 'Jueves' },
-  { value: 5, label: 'Viernes' },
-  { value: 6, label: 'Sábado' },
-  { value: 0, label: 'Domingo' },
-];
+const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-type ScheduleSlot = {
-  day_of_week: number; // 0=Dom … 6=Sáb
-  start_time: string;  // 'HH:MM'
-};
+function offsetDateStr(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+function weekdayLabel(dateStr: string): string {
+  return DAY_LABELS[getDayOfWeekLocal(dateStr)];
+}
+
+function getDayOfWeekLocal(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+// Informational only (shown as "1x/sem" etc. elsewhere) — never used for
+// pricing anymore. Distinct weekdays among the exact dates picked.
+function distinctWeekdayCount(dates: ExactSession[]): number {
+  return new Set(dates.map(d => getDayOfWeekLocal(d.date))).size || 1;
+}
 
 type ServiceItem = {
   id: string;
@@ -45,15 +50,15 @@ type ServiceItem = {
   price: number;
 };
 
+type ExactSession = { date: string; time: string };
+
 type EnrollmentServiceLine = {
   service_id: string;
   service_name: string;
-  sessions_per_week: number;
   session_duration_min: number;
   unit_price: number;
-  schedules: ScheduleSlot[]; // one per sessions_per_week
+  sessionDates: ExactSession[]; // exact calendar dates picked by hand — the actual source of truth for attendance
   billing_mode: 'continuous' | 'finite';
-  total_sessions: number | '';
 };
 
 type BeneficiaryForm = {
@@ -87,13 +92,21 @@ export function MatriculaWizard() {
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [enrollmentServices, setEnrollmentServices] = useState<EnrollmentServiceLine[]>([]);
+  const [showQuickService, setShowQuickService] = useState(false);
+  const [quickServiceName, setQuickServiceName] = useState('');
+  const [quickServicePrice, setQuickServicePrice] = useState<number | ''>('');
+  const [creatingQuickService, setCreatingQuickService] = useState(false);
   const [addingServiceId, setAddingServiceId] = useState('');
+  const [dateDraft, setDateDraft] = useState<Record<string, { date: string; time: string }>>({});
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [previousDeposit, setPreviousDeposit] = useState<number>(0);
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [chargeNotes, setChargeNotes] = useState('');
-  const [createdEnrollmentId, setCreatedEnrollmentId] = useState<string | null>(null);
+  const [sourceAppointmentId, setSourceAppointmentId] = useState<string | null>(null);
+  const [additionalPayment, setAdditionalPayment] = useState<number | ''>('');
+  const [additionalPaymentMethod, setAdditionalPaymentMethod] = useState('cash');
+  const [additionalPaymentDate, setAdditionalPaymentDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [beneficiary, setBeneficiary] = useState<BeneficiaryForm>({
     first_name: '',
@@ -112,9 +125,11 @@ export function MatriculaWizard() {
     relationship: 'Madre',
   });
 
-  // Total sum of all enrollment services
+  // Total = precio/sesión × cantidad real de fechas agregadas. No usa
+  // "sesiones/semana" — ese campo quedó desconectado del conteo real y
+  // generaba cargos que no correspondían a las fechas efectivamente creadas.
   const totalAmount = enrollmentServices.reduce(
-    (sum, s) => sum + s.unit_price * s.sessions_per_week,
+    (sum, s) => sum + s.unit_price * s.sessionDates.length,
     0
   );
 
@@ -131,10 +146,60 @@ export function MatriculaWizard() {
     const rName = params.get('repName');
     const ph = params.get('phone');
     const dep = params.get('depositAmount');
+    const apptId = params.get('appointmentId');
+    const benId = params.get('beneficiaryId');
 
     let hasData = false;
 
+    if (apptId) setSourceAppointmentId(apptId);
+
     if (dep) setPreviousDeposit(Number(dep) || 0);
+
+    // Coming from "Nueva Inscripción" on an existing beneficiary's detail
+    // page: load the beneficiary and their primary representative and skip
+    // straight to step 3 — both are already resolved, nothing to search.
+    if (benId) {
+      (async () => {
+        const { data: ben } = await supabase.from('beneficiaries').select('*').eq('id', benId).single();
+        if (ben) {
+          setBeneficiary({
+            id: ben.id,
+            first_name: ben.first_name,
+            last_name: ben.last_name,
+            birth_date: ben.birth_date || '',
+            consultation_reason: ben.consultation_reason || '',
+            photo_consent: ben.photo_consent ?? true,
+          });
+          setBenMode('search');
+        }
+
+        const { data: repLink } = await supabase
+          .from('beneficiary_representatives')
+          .select('representatives(*)')
+          .eq('beneficiary_id', benId)
+          .limit(1)
+          .maybeSingle();
+        const rep: any = (repLink as any)?.representatives;
+        if (rep) {
+          setRepresentative({
+            id: rep.id,
+            cedula: rep.identification || '',
+            first_name: rep.first_name,
+            last_name: rep.last_name,
+            email: rep.email || '',
+            phone: rep.phone || '',
+            relationship: rep.relationship || 'Madre',
+          });
+          setRepMode('search');
+        }
+
+        if (ben) {
+          toast.success(`Matriculando a ${ben.first_name} ${ben.last_name}.`);
+          setCurrentStep(rep ? 3 : 2);
+        }
+      })();
+      return;
+    }
 
     if (pName) {
       const parts = pName.trim().split(' ');
@@ -206,6 +271,41 @@ export function MatriculaWizard() {
     return data || [];
   };
 
+  // Create a catalog service on the spot, without leaving the wizard — for
+  // when staff realize mid-matrícula that the therapy isn't in the catalog
+  // yet and don't want to lose everything already filled in.
+  const handleCreateQuickService = async () => {
+    if (!currentOrg) return;
+    if (!quickServiceName.trim()) { toast.error('Ponle un nombre al servicio.'); return; }
+    if (!quickServicePrice || Number(quickServicePrice) < 0) { toast.error('Ingresa un precio válido.'); return; }
+
+    setCreatingQuickService(true);
+    try {
+      const { data, error } = await supabase
+        .from('services')
+        .insert({
+          organization_id: currentOrg.id,
+          name: quickServiceName.trim(),
+          price: Number(quickServicePrice),
+          is_active: true,
+        })
+        .select('id, name, price')
+        .single();
+      if (error) throw error;
+
+      setServices(prev => [...prev, data as ServiceItem]);
+      setAddingServiceId(data.id);
+      setQuickServiceName('');
+      setQuickServicePrice('');
+      setShowQuickService(false);
+      toast.success(`Servicio "${data.name}" creado y agregado al catálogo.`);
+    } catch (err: any) {
+      toast.error('Error creando servicio: ' + err.message);
+    } finally {
+      setCreatingQuickService(false);
+    }
+  };
+
   // ─── Service Lines ────────────────────────────────────────────────────────────
 
   const addServiceLine = () => {
@@ -220,12 +320,10 @@ export function MatriculaWizard() {
       {
         service_id: svc.id,
         service_name: svc.name,
-        sessions_per_week: 1,
         session_duration_min: 40,
         unit_price: svc.price,
-        schedules: [{ day_of_week: 1, start_time: '09:00' }], // default: Lunes 9am
+        sessionDates: [],
         billing_mode: 'continuous',
-        total_sessions: '',
       }
     ]);
     setAddingServiceId('');
@@ -235,39 +333,39 @@ export function MatriculaWizard() {
     setEnrollmentServices(prev => prev.filter(e => e.service_id !== serviceId));
   };
 
-  const updateServiceLine = (serviceId: string, field: keyof Omit<EnrollmentServiceLine, 'schedules'>, value: number | string) => {
+  const updateServiceLine = (serviceId: string, field: keyof Omit<EnrollmentServiceLine, 'sessionDates'>, value: number | string) => {
+    setEnrollmentServices(prev =>
+      prev.map(e => (e.service_id === serviceId ? { ...e, [field]: value } : e))
+    );
+  };
+
+  // ─── Exact session dates (no day-of-week recurrence math) ───────────────────
+
+  const addSessionDate = (serviceId: string, date: string, time: string) => {
+    if (!date || !time) { toast.error('Elige fecha y hora de la sesión.'); return; }
     setEnrollmentServices(prev =>
       prev.map(e => {
         if (e.service_id !== serviceId) return e;
-        const updated = { ...e, [field]: value };
-        // Sync schedules count to sessions_per_week
-        if (field === 'sessions_per_week') {
-          const newCount = Number(value);
-          const currentSlots = [...e.schedules];
-          if (newCount > currentSlots.length) {
-            for (let i = currentSlots.length; i < newCount; i++) {
-              currentSlots.push({ day_of_week: (currentSlots[i - 1]?.day_of_week ?? 1) % 6 + 1, start_time: '09:00' });
-            }
-          } else {
-            currentSlots.splice(newCount);
-          }
-          updated.schedules = currentSlots;
+        if (e.sessionDates.some(s => s.date === date && s.time === time)) {
+          toast.error('Esa fecha y hora ya está en la lista.');
+          return e;
         }
-        return updated;
+        const next = [...e.sessionDates, { date, time }].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        return { ...e, sessionDates: next };
       })
     );
   };
 
-  const updateScheduleSlot = (serviceId: string, slotIndex: number, field: keyof ScheduleSlot, value: number | string) => {
+  const removeSessionDate = (serviceId: string, index: number) => {
     setEnrollmentServices(prev =>
-      prev.map(e => {
-        if (e.service_id !== serviceId) return e;
-        const newSchedules = e.schedules.map((s, i) =>
-          i === slotIndex ? { ...s, [field]: field === 'day_of_week' ? Number(value) : value } : s
-        );
-        return { ...e, schedules: newSchedules };
-      })
+      prev.map(e => (e.service_id === serviceId ? { ...e, sessionDates: e.sessionDates.filter((_, i) => i !== index) } : e))
     );
+  };
+
+  // Explicit, one-click convenience — not automatic recurrence: duplicates
+  // one existing date exactly 7 days later, same time.
+  const addWeekAfter = (serviceId: string, sourceDate: string, time: string) => {
+    addSessionDate(serviceId, offsetDateStr(sourceDate, 7), time);
   };
 
   // ─── Validation ────────────────────────────────────────────────────────────────
@@ -380,21 +478,14 @@ export function MatriculaWizard() {
         }
       }
 
-      // Calculate end_date for finite packages
+      // end_date = the latest exact session date picked, for finite packages
+      // only (mixing in a continuous/subscription service means no fixed end).
       let calculatedEndDate: string | null = null;
       const hasContinuous = enrollmentServices.some(s => s.billing_mode === 'continuous');
-      if (!hasContinuous && enrollmentServices.length > 0) {
-        let maxWeeks = 0;
-        enrollmentServices.forEach(s => {
-          const sessions = Number(s.total_sessions) || 0;
-          const spw = Number(s.sessions_per_week) || 1;
-          const weeks = Math.ceil(sessions / spw);
-          if (weeks > maxWeeks) maxWeeks = weeks;
-        });
-        if (maxWeeks > 0) {
-          const d = new Date(startDate);
-          d.setDate(d.getDate() + (maxWeeks * 7));
-          calculatedEndDate = d.toISOString().split('T')[0];
+      if (!hasContinuous) {
+        const allDates = enrollmentServices.flatMap(s => s.sessionDates.map(sd => sd.date));
+        if (allDates.length > 0) {
+          calculatedEndDate = allDates.reduce((max, d) => (d > max ? d : max), allDates[0]);
         }
       }
 
@@ -413,18 +504,22 @@ export function MatriculaWizard() {
         .single();
       if (enrollErr) throw enrollErr;
       const enrollmentId = newEnrollment.id;
-      setCreatedEnrollmentId(enrollmentId);
 
-      // 5. Create Enrollment Services + their schedules
+      // 5. Create Enrollment Services + one attendance row per exact date
+      // picked by hand — no day-of-week recurrence is computed. A lightweight
+      // enrollment_schedules row per distinct (weekday, time) is still kept
+      // so the "horario" summary shown elsewhere (ej. detalle del
+      // beneficiario) has something to display, but it is a derived label,
+      // never the source used to generate sessions.
       if (enrollmentServices.length > 0) {
         for (const svc of enrollmentServices) {
           const serviceRow = {
             enrollment_id: enrollmentId,
             service_id: svc.service_id,
-            sessions_per_week: svc.sessions_per_week,
+            sessions_per_week: distinctWeekdayCount(svc.sessionDates), // informational only
             session_duration_min: svc.session_duration_min,
             unit_price: svc.unit_price,
-            total_sessions: svc.billing_mode === 'finite' ? Number(svc.total_sessions) || null : null,
+            total_sessions: svc.billing_mode === 'finite' ? svc.sessionDates.length || null : null,
             status: 'active',
           };
           const { data: newSvc, error: svcErr } = await (supabase as any)
@@ -434,69 +529,51 @@ export function MatriculaWizard() {
             .single();
           if (svcErr) throw svcErr;
 
-          // Save schedule slots for this service
-          if (svc.schedules && svc.schedules.length > 0) {
-            const scheduleRows = svc.schedules
-              .filter(slot => slot.start_time)
-              .map(slot => {
-                const [h, m] = slot.start_time.split(':').map(Number);
-                const endMin = h * 60 + m + svc.session_duration_min;
-                const endH = Math.floor(endMin / 60) % 24;
-                const endM = endMin % 60;
-                const end_time = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
-                return {
-                  organization_id: currentOrg!.id,
-                  enrollment_service_id: newSvc.id,
-                  day_of_week: slot.day_of_week,
-                  start_time: slot.start_time + ':00',
-                  end_time: end_time + ':00',
-                  is_active: true,
-                };
-              });
-            if (scheduleRows.length > 0) {
-              const { data: insertedSchedules, error: schErr } = await (supabase as any)
-                .from('enrollment_schedules')
-                .insert(scheduleRows)
-                .select();
-              
-              if (schErr) throw schErr;
+          if (svc.sessionDates.length === 0) continue;
 
-              // Instantiate attendance sessions based on the schedules
-              if (insertedSchedules && insertedSchedules.length > 0) {
-                // Determine how many sessions to generate (finite = total_sessions, continuous = 24 default)
-                const limit = svc.billing_mode === 'finite' && svc.total_sessions ? svc.total_sessions : 24;
-                const attendanceRows = [];
-                let generatedCount = 0;
-                let currentLocal = new Date(startDate + 'T00:00:00'); // Use startDate at midnight local
-                let sanityCheck = 0; // prevent infinite loops
+          const endTimeFor = (time: string) => {
+            const [h, m] = time.split(':').map(Number);
+            const endMin = h * 60 + m + svc.session_duration_min;
+            const endH = Math.floor(endMin / 60) % 24;
+            const endM = endMin % 60;
+            return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
+          };
 
-                while (generatedCount < limit && sanityCheck < 365) {
-                  const dow = currentLocal.getDay();
-                  const matchingSchedule = (insertedSchedules as any[]).find(s => s.day_of_week === dow);
-                  
-                  if (matchingSchedule) {
-                    attendanceRows.push({
-                      organization_id: currentOrg!.id,
-                      beneficiary_id: benId,
-                      session_date: currentLocal.toISOString().split('T')[0],
-                      status: 'scheduled',
-                      service_id: svc.service_id,
-                      enrollment_schedule_id: matchingSchedule.id,
-                      scheduled_time: matchingSchedule.start_time
-                    });
-                    generatedCount++;
-                  }
-                  currentLocal.setDate(currentLocal.getDate() + 1);
-                  sanityCheck++;
-                }
-
-                if (attendanceRows.length > 0) {
-                  const { error: attErr } = await (supabase as any).from('attendance').insert(attendanceRows);
-                  if (attErr) console.error('Error instantiating sessions:', attErr);
-                }
-              }
-            }
+          // One enrollment_schedules bucket per distinct (day_of_week, time)
+          // among the exact dates chosen — display summary only.
+          const scheduleByKey = new Map<string, { id: string }>();
+          for (const sd of svc.sessionDates) {
+            const dow = getDayOfWeekLocal(sd.date);
+            const key = `${dow}-${sd.time}`;
+            if (scheduleByKey.has(key)) continue;
+            const { data: newSchedule, error: schErr } = await (supabase as any)
+              .from('enrollment_schedules')
+              .insert({
+                organization_id: currentOrg!.id,
+                enrollment_service_id: newSvc.id,
+                day_of_week: dow,
+                start_time: sd.time + ':00',
+                end_time: endTimeFor(sd.time),
+                is_active: true,
+              })
+              .select('id')
+              .single();
+            if (schErr) throw schErr;
+            scheduleByKey.set(key, newSchedule);
           }
+
+          const attendanceRows = svc.sessionDates.map(sd => ({
+            organization_id: currentOrg!.id,
+            beneficiary_id: benId,
+            session_date: sd.date,
+            status: 'scheduled',
+            service_id: svc.service_id,
+            enrollment_schedule_id: scheduleByKey.get(`${getDayOfWeekLocal(sd.date)}-${sd.time}`)?.id ?? null,
+            scheduled_time: sd.time + ':00',
+          }));
+
+          const { error: attErr } = await (supabase as any).from('attendance').insert(attendanceRows);
+          if (attErr) throw attErr;
         }
       }
 
@@ -538,6 +615,23 @@ export function MatriculaWizard() {
         });
       }
 
+      // 7b. Register any additional payment collected at enrollment time,
+      // on top of the deposit (e.g. 50% or full payment up front).
+      if (newCharge && additionalPayment && Number(additionalPayment) > 0) {
+        const alreadyCredited = Math.min(previousDeposit, totalAmount);
+        const cappedExtra = Math.min(Number(additionalPayment), totalAmount - alreadyCredited);
+        if (cappedExtra > 0) {
+          await supabase.from('internal_payments').insert({
+            organization_id: currentOrg.id,
+            charge_id: newCharge.id,
+            amount: cappedExtra,
+            payment_date: additionalPaymentDate,
+            method: additionalPaymentMethod,
+            reference: 'Pago registrado al momento de la matrícula',
+          });
+        }
+      }
+
       // 8. Create Commitment record (for Acta de Compromiso)
       await supabase.from('commitments').insert({
         organization_id: currentOrg.id,
@@ -549,6 +643,14 @@ export function MatriculaWizard() {
         photo_consent: beneficiary.photo_consent,
         status: 'signed',
       });
+
+      // 9. Close the loop with the appointment this matrícula came from, if any
+      if (sourceAppointmentId) {
+        await supabase
+          .from('appointments')
+          .update({ status: 'converted', converted_beneficiary_id: benId })
+          .eq('id', sourceAppointmentId);
+      }
 
       toast.success('¡Matrícula e inscripción completadas exitosamente!');
 
@@ -580,7 +682,7 @@ export function MatriculaWizard() {
       {/* Page Header */}
       <div className="flex items-center gap-4">
         <button
-          onClick={() => navigate('/app')}
+          onClick={() => navigate(-1)}
           className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-500 transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
@@ -680,7 +782,7 @@ export function MatriculaWizard() {
                         </div>
                         <div>
                           <p className="font-bold text-slate-900">{b.first_name} {b.last_name}</p>
-                          {b.birth_date && <p className="text-[11px] text-slate-500">Nacimiento: {b.birth_date}</p>}
+                          {b.birth_date && <p className="text-[11px] text-slate-500">Nacimiento: {formatDate(b.birth_date)}</p>}
                         </div>
                       </div>
                     )}
@@ -856,35 +958,88 @@ export function MatriculaWizard() {
               </h2>
 
               {/* Add service line */}
-              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5">
-                <p className="text-xs font-bold text-indigo-800 mb-2">Agregar Terapia / Servicio</p>
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 space-y-2.5">
+                <p className="text-xs font-bold text-indigo-800">Agregar Terapia / Servicio</p>
                 <div className="flex gap-2">
-                  {services.length === 0 ? (
+                  {services.length === 0 && !showQuickService ? (
                     <div className="flex-1 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
-                      ⚠️ No hay servicios configurados. Ve a <strong>Catálogo de Servicios</strong> para agregar terapias primero.
+                      ⚠️ No hay servicios configurados todavía. Usa "Crear servicio rápido" abajo.
                     </div>
-                  ) : (
-                    <select
-                      value={addingServiceId}
-                      onChange={(e) => setAddingServiceId(e.target.value)}
-                      className="flex-1 px-3 py-2 text-sm border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                    >
-                      <option value="">-- Seleccionar servicio del catálogo --</option>
-                      {services.map(s => (
-                        <option key={s.id} value={s.id}>{s.name} — ${s.price.toFixed(2)}/sesión</option>
-                      ))}
-                    </select>
+                  ) : !showQuickService && (
+                    <>
+                      <select
+                        value={addingServiceId}
+                        onChange={(e) => setAddingServiceId(e.target.value)}
+                        className="flex-1 px-3 py-2 text-sm border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="">-- Seleccionar servicio del catálogo --</option>
+                        {services.map(s => (
+                          <option key={s.id} value={s.id}>{s.name} — ${s.price.toFixed(2)}/sesión</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={addServiceLine}
+                        disabled={!addingServiceId}
+                        className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition flex items-center gap-1"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Agregar
+                      </button>
+                    </>
                   )}
+                </div>
+
+                {showQuickService ? (
+                  <div className="bg-white border border-indigo-200 rounded-lg p-3 space-y-2">
+                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Nuevo servicio en el catálogo</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Ej. Terapia de Lenguaje"
+                        value={quickServiceName}
+                        onChange={(e) => setQuickServiceName(e.target.value)}
+                        className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <div className="relative w-28">
+                        <span className="absolute left-2.5 top-2 text-xs text-slate-400 font-bold">$</span>
+                        <input
+                          type="number" step="0.01" min="0"
+                          placeholder="0.00"
+                          value={quickServicePrice}
+                          onChange={(e) => setQuickServicePrice(e.target.value === '' ? '' : Number(e.target.value))}
+                          className="w-full pl-5 pr-2 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setShowQuickService(false); setQuickServiceName(''); setQuickServicePrice(''); }}
+                        className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCreateQuickService}
+                        disabled={creatingQuickService}
+                        className="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {creatingQuickService ? 'Creando...' : 'Crear y usar'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                   <button
                     type="button"
-                    onClick={addServiceLine}
-                    disabled={!addingServiceId}
-                    className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition flex items-center gap-1"
+                    onClick={() => setShowQuickService(true)}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
                   >
-                    <Plus className="w-4 h-4" />
-                    Agregar
+                    <Plus className="w-3.5 h-3.5" />
+                    Crear servicio rápido (si no está en el catálogo)
                   </button>
-                </div>
+                )}
               </div>
 
               {/* Services Table */}
@@ -894,10 +1049,9 @@ export function MatriculaWizard() {
                     <thead className="bg-slate-50 text-[11px] font-bold uppercase text-slate-500 tracking-wider">
                       <tr>
                         <th className="px-4 py-2.5 text-left">Terapia / Servicio</th>
-                        <th className="px-4 py-2.5 text-center">Sesiones/Semana</th>
                         <th className="px-4 py-2.5 text-center">Min. por Sesión</th>
                         <th className="px-4 py-2.5 text-center">Precio/Sesión</th>
-                        <th className="px-4 py-2.5 text-center">Subtotal/Semana</th>
+                        <th className="px-4 py-2.5 text-center">Subtotal</th>
                         <th className="px-4 py-2.5 text-center"></th>
                       </tr>
                     </thead>
@@ -911,15 +1065,6 @@ export function MatriculaWizard() {
                                   {svc.service_name}
                                 </span>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[11px] font-bold text-slate-500 uppercase">Sesiones/sem</span>
-                                    <input
-                                      type="number" min={1} max={7}
-                                      className="w-14 text-center border border-slate-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
-                                      value={svc.sessions_per_week}
-                                      onChange={(e) => updateServiceLine(svc.service_id, 'sessions_per_week', Number(e.target.value))}
-                                    />
-                                  </div>
                                   <div className="flex items-center gap-1.5">
                                     <span className="text-[11px] font-bold text-slate-500 uppercase">Duración</span>
                                     <select
@@ -944,8 +1089,8 @@ export function MatriculaWizard() {
                                       onChange={(e) => updateServiceLine(svc.service_id, 'unit_price', Number(e.target.value))}
                                     />
                                   </div>
-                                  <span className="font-extrabold text-indigo-800 font-mono text-sm min-w-[70px] text-right">
-                                    = ${(svc.unit_price * svc.sessions_per_week).toFixed(2)}/sem
+                                  <span className="font-extrabold text-indigo-800 font-mono text-sm min-w-[90px] text-right">
+                                    = ${(svc.unit_price * svc.sessionDates.length).toFixed(2)} ({svc.sessionDates.length} ses.)
                                   </span>
                                   <button
                                     onClick={() => removeServiceLine(svc.service_id)}
@@ -973,56 +1118,79 @@ export function MatriculaWizard() {
                                 {svc.billing_mode === 'finite' && (
                                   <div className="flex items-center gap-2">
                                     <span className="text-[11px] font-bold text-slate-500 uppercase">Total sesiones:</span>
-                                    <input
-                                      type="number" min={1}
-                                      placeholder="Ej: 4"
-                                      className="w-16 border border-slate-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500 bg-white"
-                                      value={svc.total_sessions}
-                                      onChange={(e) => updateServiceLine(svc.service_id, 'total_sessions', e.target.value)}
-                                    />
+                                    <span className="text-sm font-mono font-bold text-slate-800">{svc.sessionDates.length}</span>
+                                    <span className="text-[10px] text-slate-400">(según fechas agregadas abajo)</span>
                                   </div>
                                 )}
                               </div>
 
-
-                              {/* Schedule slots — one per sessions_per_week */}
+                              {/* Exact session dates — picked one by one, no weekday recurrence */}
                               <div className="mt-2.5 ml-2 space-y-1.5">
                                 <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1">
                                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                   </svg>
-                                  Horario semanal (opcional — puedes configurarlo después)
+                                  Fechas exactas de sesión
                                 </p>
-                                {svc.schedules.map((slot, idx) => (
-                                  <div key={idx} className="flex items-center gap-2 bg-indigo-50/70 border border-indigo-100 rounded-lg px-3 py-1.5">
-                                    <span className="text-[11px] font-bold text-indigo-600 w-16 shrink-0">
-                                      Sesión {idx + 1}:
+
+                                {svc.sessionDates.length === 0 && (
+                                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                                    Todavía no agregaste ninguna fecha. Sin fechas, no se generará asistencia para esta terapia.
+                                  </p>
+                                )}
+
+                                {svc.sessionDates.map((sd, idx) => (
+                                  <div key={`${sd.date}-${sd.time}`} className="flex items-center gap-2 bg-indigo-50/70 border border-indigo-100 rounded-lg px-3 py-1.5">
+                                    <span className="text-[11px] font-bold text-indigo-700 min-w-[90px]">
+                                      {weekdayLabel(sd.date)}
                                     </span>
-                                    <select
-                                      value={slot.day_of_week}
-                                      onChange={(e) => updateScheduleSlot(svc.service_id, idx, 'day_of_week', Number(e.target.value))}
-                                      className="text-xs border border-indigo-200 rounded-lg px-2 py-1 bg-white focus:ring-2 focus:ring-indigo-400 font-semibold text-slate-800"
+                                    <span className="text-xs font-mono font-semibold text-slate-800">{formatDate(sd.date)}</span>
+                                    <span className="text-[11px] text-slate-500">a las</span>
+                                    <span className="text-xs font-mono font-semibold text-slate-800">{sd.time}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => addWeekAfter(svc.service_id, sd.date, sd.time)}
+                                      className="ml-auto text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 rounded px-2 py-0.5"
+                                      title="Agregar otra fecha, 7 días después, misma hora"
                                     >
-                                      {DAYS.map(d => (
-                                        <option key={d.value} value={d.value}>{d.label}</option>
-                                      ))}
-                                    </select>
-                                    <span className="text-[11px] text-slate-500 font-semibold">a las</span>
-                                    <input
-                                      type="time"
-                                      value={slot.start_time}
-                                      onChange={(e) => updateScheduleSlot(svc.service_id, idx, 'start_time', e.target.value)}
-                                      className="text-xs border border-indigo-200 rounded-lg px-2 py-1 bg-white focus:ring-2 focus:ring-indigo-400 font-mono font-semibold text-slate-800"
-                                    />
-                                    <span className="text-[11px] text-slate-400 font-mono">
-                                      → {(() => {
-                                        const [h, m] = slot.start_time.split(':').map(Number);
-                                        const totalMin = h * 60 + m + svc.session_duration_min;
-                                        return `${String(Math.floor(totalMin / 60) % 24).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
-                                      })()}
-                                    </span>
+                                      +7 días
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeSessionDate(svc.service_id, idx)}
+                                      className="text-red-400 hover:text-red-600 p-1 rounded hover:bg-red-50"
+                                      title="Quitar esta fecha"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                   </div>
                                 ))}
+
+                                <div className="flex items-center gap-2 pt-1">
+                                  <input
+                                    type="date"
+                                    value={dateDraft[svc.service_id]?.date || ''}
+                                    onChange={(e) => setDateDraft(prev => ({ ...prev, [svc.service_id]: { date: e.target.value, time: prev[svc.service_id]?.time || '09:00' } }))}
+                                    className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400"
+                                  />
+                                  <input
+                                    type="time"
+                                    value={dateDraft[svc.service_id]?.time || '09:00'}
+                                    onChange={(e) => setDateDraft(prev => ({ ...prev, [svc.service_id]: { date: prev[svc.service_id]?.date || '', time: e.target.value } }))}
+                                    className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400 font-mono"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const draft = dateDraft[svc.service_id];
+                                      if (draft?.date) addSessionDate(svc.service_id, draft.date, draft.time || '09:00');
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-1"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    Agregar Fecha
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -1031,7 +1199,7 @@ export function MatriculaWizard() {
                     </tbody>
                     <tfoot className="bg-indigo-50">
                       <tr>
-                        <td colSpan={4} className="px-4 py-3 text-right font-bold text-slate-700 text-sm">Total por Semana:</td>
+                        <td colSpan={3} className="px-4 py-3 text-right font-bold text-slate-700 text-sm">Total de la Matrícula:</td>
                         <td className="px-4 py-3 text-center font-extrabold text-indigo-800 text-base font-mono">
                           ${totalAmount.toFixed(2)}
                         </td>
@@ -1070,6 +1238,54 @@ export function MatriculaWizard() {
                   </div>
                 </div>
               )}
+
+              {/* Optional payment collected right now — wording depends on
+                  whether there's already a deposit credited (from a cita
+                  previa) or this is a brand-new enrollment with nothing paid yet */}
+              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+                <div>
+                  <p className="text-sm font-bold text-slate-800">
+                    {previousDeposit > 0 ? '¿Va a pagar algo más ahora? (opcional)' : 'Registrar Pago (opcional)'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {previousDeposit > 0
+                      ? 'Si el representante ya va a abonar el 50%, el total, o cualquier otro monto además del depósito de la cita previa, regístralo aquí.'
+                      : 'Si el representante va a pagar ahora mismo (50%, el total, o cualquier abono), regístralo aquí.'}
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className={labelClass}>Monto (USD)</label>
+                    <input
+                      type="number" step="0.01" min="0"
+                      max={Math.max(0, totalAmount - previousDeposit)}
+                      className={inputClass}
+                      placeholder="0.00"
+                      value={additionalPayment}
+                      onChange={(e) => setAdditionalPayment(e.target.value === '' ? '' : Number(e.target.value))}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Método de Pago</label>
+                    <select className={inputClass} value={additionalPaymentMethod} onChange={(e) => setAdditionalPaymentMethod(e.target.value)}>
+                      <option value="cash">Efectivo</option>
+                      <option value="transfer">Transferencia</option>
+                      <option value="card">Tarjeta</option>
+                      <option value="other">Otro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Fecha del Pago</label>
+                    <input
+                      type="date"
+                      className={inputClass}
+                      value={additionalPaymentDate}
+                      max={new Date().toISOString().split('T')[0]}
+                      onChange={(e) => setAdditionalPaymentDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1090,8 +1306,8 @@ export function MatriculaWizard() {
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Resumen</p>
                 {enrollmentServices.map(s => (
                   <div key={s.service_id} className="flex justify-between text-sm">
-                    <span className="text-slate-700">{s.service_name} ({s.sessions_per_week}x/sem)</span>
-                    <span className="font-bold text-slate-900 font-mono">${(s.unit_price * s.sessions_per_week).toFixed(2)}/sem</span>
+                    <span className="text-slate-700">{s.service_name} ({s.sessionDates.length} ses.)</span>
+                    <span className="font-bold text-slate-900 font-mono">${(s.unit_price * s.sessionDates.length).toFixed(2)}</span>
                   </div>
                 ))}
                 <div className="border-t border-slate-200 pt-2 flex justify-between font-bold">

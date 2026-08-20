@@ -4,6 +4,8 @@ import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import { useAuth } from '../auth/AuthProvider';
+import { formatDateWithWeekday } from '../../lib/formatDate';
+import { AttendanceHistoryModal } from './AttendanceHistory';
 import {
   CalendarCheck,
   CheckCircle,
@@ -15,26 +17,25 @@ import {
   Users,
   GraduationCap,
   ExternalLink,
+  History,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AttendanceStatus = 'present' | 'absent' | 'late' | 'justified';
+type AttendanceStatus = 'present' | 'absent' | 'late' | 'justified' | 'scheduled';
 
 interface ScheduledSession {
-  // From enrollment_schedules join
-  schedule_id: string;
-  enrollment_service_id: string;
+  // Every row is a real public.attendance row for the selected date —
+  // attendance is the single source of truth for what's scheduled, not a
+  // day-of-week pattern re-derived on the fly.
+  attendance_id: string;
+  service_id: string;
   service_name: string;
-  start_time: string; // 'HH:MM:SS'
-  end_time: string;
-  // Beneficiary info (from enrollment → beneficiary)
+  scheduled_time: string; // 'HH:MM:SS'
   beneficiary_id: string;
   first_name: string;
   last_name: string;
-  // Attendance record for this date (may be null)
-  attendance_id: string | null;
-  attendance_status: AttendanceStatus | null;
+  status: AttendanceStatus;
   actual_arrival_time: string | null;
 }
 
@@ -48,25 +49,13 @@ function toLocalISODate(date: Date): string {
 }
 
 function formatDisplayDate(dateStr: string): string {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.toLocaleDateString('es-EC', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  return formatDateWithWeekday(dateStr);
 }
 
 function offsetDate(dateStr: string, days: number): string {
   const [year, month, day] = dateStr.split('-').map(Number);
   const d = new Date(year, month - 1, day + days);
   return toLocalISODate(d);
-}
-
-function getDayOfWeek(dateStr: string): number {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day).getDay(); // 0=Sun, 1=Mon...
 }
 
 function formatTime(timeStr: string): string {
@@ -80,6 +69,27 @@ function nowTime(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`;
 }
 
+function currentYearStart(): string {
+  return `${new Date().getFullYear()}-01-01`;
+}
+
+// A check-in can be registered a few minutes early — staff mark kids as
+// they physically arrive, which is often slightly before the scheduled
+// start. 15 minutes matches the window agreed for this module.
+const ARRIVAL_UNLOCK_MINUTES = 15;
+
+function canRegisterArrival(selectedDate: string, scheduledTime: string): boolean {
+  const sessionDateTime = new Date(`${selectedDate}T${scheduledTime}`);
+  const unlockAt = new Date(sessionDateTime.getTime() - ARRIVAL_UNLOCK_MINUTES * 60000);
+  return new Date() >= unlockAt;
+}
+
+function minusMinutes(timeStr: string, minutes: number): string {
+  const [h, m] = timeStr.split(':').map(Number);
+  const total = ((h * 60 + m - minutes) % 1440 + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 // ─── Status config ────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<AttendanceStatus, { label: string; badgeBg: string; badgeText: string; icon: React.ReactNode }> = {
@@ -87,16 +97,12 @@ const STATUS_CONFIG: Record<AttendanceStatus, { label: string; badgeBg: string; 
   absent:  { label: 'Ausente',  badgeBg: 'bg-red-100',     badgeText: 'text-red-700',     icon: <XCircle size={14} /> },
   late:    { label: 'Tarde',    badgeBg: 'bg-amber-100',   badgeText: 'text-amber-700',   icon: <Clock size={14} /> },
   justified: { label: 'Justificado', badgeBg: 'bg-blue-100', badgeText: 'text-blue-700', icon: <AlertCircle size={14} /> },
+  scheduled: { label: 'Sin registrar', badgeBg: 'bg-slate-100', badgeText: 'text-slate-500', icon: null },
 };
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: AttendanceStatus | null }) {
-  if (!status) return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500">
-      Sin registrar
-    </span>
-  );
+function StatusBadge({ status }: { status: AttendanceStatus }) {
   const cfg = STATUS_CONFIG[status];
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.badgeBg} ${cfg.badgeText}`}>
@@ -111,10 +117,10 @@ function StatusBadge({ status }: { status: AttendanceStatus | null }) {
 function SummaryBar({ sessions }: { sessions: ScheduledSession[] }) {
   const counts = sessions.reduce(
     (acc, s) => {
-      if (s.attendance_status === 'present') acc.present++;
-      else if (s.attendance_status === 'absent') acc.absent++;
-      else if (s.attendance_status === 'late') acc.late++;
-      else if (s.attendance_status === 'justified') acc.justified++;
+      if (s.status === 'present') acc.present++;
+      else if (s.status === 'absent') acc.absent++;
+      else if (s.status === 'late') acc.late++;
+      else if (s.status === 'justified') acc.justified++;
       else acc.unregistered++;
       return acc;
     },
@@ -146,22 +152,37 @@ function SummaryBar({ sessions }: { sessions: ScheduledSession[] }) {
 
 interface SessionRowProps {
   session: ScheduledSession;
+  selectedDate: string;
   savingKey: string | null;
-  onMark: (scheduleId: string, beneficiaryId: string, serviceId: string, status: AttendanceStatus, scheduledTime: string) => Promise<void>;
+  onMark: (attendanceId: string, status: AttendanceStatus) => Promise<void>;
   onNavigate: (beneficiaryId: string) => void;
 }
 
-function SessionRow({ session, savingKey, onMark, onNavigate }: SessionRowProps) {
-  const key = `${session.schedule_id}-${session.beneficiary_id}`;
-  const isSaving = savingKey === key;
+function SessionRow({ session, selectedDate, savingKey, onMark, onNavigate }: SessionRowProps) {
+  const isSaving = savingKey === session.attendance_id;
   const initials = `${session.first_name[0] ?? ''}${session.last_name[0] ?? ''}`.toUpperCase();
   const fullName = `${session.first_name} ${session.last_name}`;
 
-  const actions: { status: AttendanceStatus; label: string; base: string; active: string }[] = [
-    { status: 'present',   label: 'Presente',    base: 'border border-emerald-200 text-emerald-700 hover:bg-emerald-50', active: 'bg-emerald-100 border border-emerald-400 text-emerald-800 font-bold' },
-    { status: 'late',      label: 'Tarde',       base: 'border border-amber-200 text-amber-700 hover:bg-amber-50',       active: 'bg-amber-100 border border-amber-400 text-amber-800 font-bold' },
-    { status: 'absent',    label: 'Ausente',     base: 'border border-red-200 text-red-700 hover:bg-red-50',             active: 'bg-red-100 border border-red-400 text-red-800 font-bold' },
-    { status: 'justified', label: 'Justificado', base: 'border border-blue-200 text-blue-700 hover:bg-blue-50',           active: 'bg-blue-100 border border-blue-400 text-blue-800 font-bold' },
+  // "Presente"/"Tarde" describe an observed fact — can't be registered
+  // until shortly before the session's own date+time (a small early-arrival
+  // buffer). "Ausente"/"Justificado" stay open at any time: a justificación
+  // is often reported in advance (the signed acta requires 24h notice), and
+  // staff may need to record an absence reported ahead of time too.
+  const canArrive = canRegisterArrival(selectedDate, session.scheduled_time);
+
+  // Once a session is registered, it becomes an audit record: staff can no
+  // longer flip between presente/tarde/ausente. The only correction path is
+  // "Justificado" (e.g. a representative brings a late justification) —
+  // once that's set, the record is terminal. This is what makes the module
+  // trustworthy for a "the child *was* there that day" dispute.
+  const isRegistered = session.status !== 'scheduled';
+  const isTerminal = session.status === 'justified';
+
+  const actions: { status: AttendanceStatus; label: string; base: string; active: string; requiresArrival: boolean }[] = [
+    { status: 'present',   label: 'Presente',    base: 'border border-emerald-200 text-emerald-700 hover:bg-emerald-50', active: 'bg-emerald-100 border border-emerald-400 text-emerald-800 font-bold', requiresArrival: true },
+    { status: 'late',      label: 'Tarde',       base: 'border border-amber-200 text-amber-700 hover:bg-amber-50',       active: 'bg-amber-100 border border-amber-400 text-amber-800 font-bold', requiresArrival: true },
+    { status: 'absent',    label: 'Ausente',     base: 'border border-red-200 text-red-700 hover:bg-red-50',             active: 'bg-red-100 border border-red-400 text-red-800 font-bold', requiresArrival: false },
+    { status: 'justified', label: 'Justificado', base: 'border border-blue-200 text-blue-700 hover:bg-blue-50',           active: 'bg-blue-100 border border-blue-400 text-blue-800 font-bold', requiresArrival: false },
   ];
 
   return (
@@ -169,8 +190,7 @@ function SessionRow({ session, savingKey, onMark, onNavigate }: SessionRowProps)
       {/* Time chip */}
       <div className="flex-shrink-0 text-center bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 min-w-[70px]">
         <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider">Hora</p>
-        <p className="text-base font-extrabold text-indigo-800 font-mono leading-tight">{formatTime(session.start_time)}</p>
-        <p className="text-[10px] text-indigo-400 font-mono">→ {formatTime(session.end_time)}</p>
+        <p className="text-base font-extrabold text-indigo-800 font-mono leading-tight">{formatTime(session.scheduled_time)}</p>
       </div>
 
       {/* Avatar + name + service */}
@@ -191,8 +211,8 @@ function SessionRow({ session, savingKey, onMark, onNavigate }: SessionRowProps)
               <GraduationCap className="w-3 h-3" />
               {session.service_name}
             </span>
-            <StatusBadge status={session.attendance_status} />
-            {session.attendance_status === 'late' && session.actual_arrival_time && (
+            <StatusBadge status={session.status} />
+            {session.status === 'late' && session.actual_arrival_time && (
               <span className="text-[11px] text-amber-600 font-mono">
                 Llegó: {formatTime(session.actual_arrival_time)}
               </span>
@@ -210,19 +230,36 @@ function SessionRow({ session, savingKey, onMark, onNavigate }: SessionRowProps)
           </div>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {actions.map(({ status, label, base, active }) => (
-              <button
-                key={status}
-                onClick={() => onMark(session.schedule_id, session.beneficiary_id, session.enrollment_service_id, status, session.start_time)}
-                disabled={isSaving}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors disabled:opacity-50 ${
-                  session.attendance_status === status ? active : base
-                }`}
-              >
-                {STATUS_CONFIG[status].icon}
-                {label}
-              </button>
-            ))}
+            {actions.map(({ status, label, base, active, requiresArrival }) => {
+              let locked = false;
+              let lockReason: string | undefined;
+
+              if (isTerminal) {
+                locked = true;
+                lockReason = 'Registro justificado: no se puede modificar.';
+              } else if (isRegistered && status !== 'justified') {
+                locked = true;
+                lockReason = 'Ya registrado. Solo se puede corregir a "Justificado".';
+              } else if (requiresArrival && !canArrive) {
+                locked = true;
+                lockReason = `Disponible a partir de las ${minusMinutes(session.scheduled_time, ARRIVAL_UNLOCK_MINUTES)}`;
+              }
+
+              return (
+                <button
+                  key={status}
+                  onClick={() => onMark(session.attendance_id, status)}
+                  disabled={isSaving || locked}
+                  title={lockReason}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    session.status === status ? active : base
+                  }`}
+                >
+                  {STATUS_CONFIG[status].icon}
+                  {label}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -241,6 +278,7 @@ export function AsistenciaModule() {
   const [sessions, setSessions] = useState<ScheduledSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   // ─── Load sessions for the selected date based on day_of_week schedules ──────
 
@@ -249,99 +287,40 @@ export function AsistenciaModule() {
     setLoading(true);
 
     try {
-      const dow = getDayOfWeek(selectedDate); // 0=Sun...6=Sat
-
-      // 1. Get all active enrollment_schedules for this day_of_week in this org
-      const { data: schedules, error: schedErr } = await (supabase as any)
-        .from('enrollment_schedules')
+      // attendance is the source of truth for what's scheduled on a given
+      // date — every row was created explicitly (matrícula, cita rápida, or
+      // reposición por falta justificada), never re-derived from a
+      // day-of-week pattern.
+      const { data, error } = await (supabase as any)
+        .from('attendance')
         .select(`
           id,
-          start_time,
-          end_time,
-          enrollment_service_id,
-          enrollment_services!inner (
-            id,
-            status,
-            service_id,
-            services ( name ),
-            enrollments!inner (
-              id,
-              status,
-              beneficiary_id,
-              beneficiaries!inner (
-                id,
-                first_name,
-                last_name,
-                is_active
-              )
-            )
-          )
+          status,
+          scheduled_time,
+          actual_arrival_time,
+          service_id,
+          services ( name ),
+          beneficiaries!inner ( id, first_name, last_name, is_active )
         `)
         .eq('organization_id', currentOrg.id)
-        .eq('day_of_week', dow)
-        .eq('is_active', true);
+        .eq('session_date', selectedDate)
+        .eq('beneficiaries.is_active', true);
 
-      if (schedErr) throw schedErr;
+      if (error) throw error;
 
-      // 2. Build a flat list of sessions
-      const flat: ScheduledSession[] = [];
-      for (const sch of schedules ?? []) {
-        const svc = (sch as any).enrollment_services;
-        if (!svc || svc.status !== 'active') continue;
-        const enr = svc.enrollments;
-        if (!enr || enr.status !== 'active') continue;
-        const ben = enr.beneficiaries;
-        if (!ben || !ben.is_active) continue;
+      const flat: ScheduledSession[] = (data ?? []).map((att: any) => ({
+        attendance_id: att.id,
+        service_id: att.service_id,
+        service_name: att.services?.name ?? '—',
+        scheduled_time: att.scheduled_time ?? '00:00:00',
+        beneficiary_id: att.beneficiaries.id,
+        first_name: att.beneficiaries.first_name,
+        last_name: att.beneficiaries.last_name,
+        status: att.status,
+        actual_arrival_time: att.actual_arrival_time,
+      }));
 
-        flat.push({
-          schedule_id: sch.id,
-          enrollment_service_id: svc.id,
-          service_name: svc.services?.name ?? '—',
-          start_time: sch.start_time,
-          end_time: sch.end_time,
-          beneficiary_id: ben.id,
-          first_name: ben.first_name,
-          last_name: ben.last_name,
-          attendance_id: null,
-          attendance_status: null,
-          actual_arrival_time: null,
-        });
-      }
-
-      // Sort by start_time
-      flat.sort((a, b) => a.start_time.localeCompare(b.start_time));
-
-      // 3. Load existing attendance records for this date (keyed by schedule_id OR beneficiary+service)
-      if (flat.length > 0) {
-        const benIds = [...new Set(flat.map(f => f.beneficiary_id))];
-        const { data: attData } = await (supabase as any)
-          .from('attendance')
-          .select('id, beneficiary_id, status, actual_arrival_time, scheduled_time, enrollment_schedule_id, service_id')
-          .eq('organization_id', currentOrg.id)
-          .eq('session_date', selectedDate)
-          .in('beneficiary_id', benIds);
-
-        // Match attendance by schedule_id first, then by beneficiary+service
-        const attBySchedule = new Map<string, any>();
-        const attByBenService = new Map<string, any>();
-        for (const att of attData ?? []) {
-          if (att.enrollment_schedule_id) attBySchedule.set(att.enrollment_schedule_id, att);
-          if (att.beneficiary_id && att.service_id) {
-            attByBenService.set(`${att.beneficiary_id}-${att.service_id}`, att);
-          }
-        }
-
-        for (const session of flat) {
-          const att = attBySchedule.get(session.schedule_id)
-            || attByBenService.get(`${session.beneficiary_id}-${session.enrollment_service_id}`);
-          if (att) {
-            session.attendance_id = att.id;
-            session.attendance_status = att.status;
-            session.actual_arrival_time = att.actual_arrival_time;
-          }
-        }
-      }
-
+      flat.sort((a, b) => a.scheduled_time.localeCompare(b.scheduled_time));
       setSessions(flat);
     } catch (err: any) {
       console.error(err);
@@ -353,74 +332,131 @@ export function AsistenciaModule() {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
+  // ─── Justified absences: offer a makeup session ──────────────────────────────
+  // Domain rule (also printed on the signed Acta de Compromiso): at most
+  // `commitments.max_justified_absences` (default 2) justified absences per
+  // year. Under that limit, offer to add one makeup session a week after the
+  // beneficiary's last currently-scheduled session for this same therapy.
+
+  const offerMakeupSession = useCallback(async (
+    orgId: string,
+    beneficiaryId: string,
+    catalogServiceId: string | null,
+    serviceName: string
+  ) => {
+    try {
+      const { count } = await supabase
+        .from('attendance')
+        .select('id', { count: 'exact', head: true })
+        .eq('beneficiary_id', beneficiaryId)
+        .eq('status', 'justified')
+        .gte('session_date', currentYearStart());
+
+      const { data: commitment } = await supabase
+        .from('commitments')
+        .select('max_justified_absences')
+        .eq('beneficiary_id', beneficiaryId)
+        .maybeSingle();
+      const max = (commitment as any)?.max_justified_absences ?? 2;
+      const used = count ?? 0;
+
+      if (used > max) {
+        toast.error(
+          `Este beneficiario ya acumula ${used} faltas justificadas este año (máximo ${max} según su acta de compromiso). No se agenda reposición automática — un owner/admin puede agendarla manualmente si corresponde.`,
+          { duration: 6000 }
+        );
+        return;
+      }
+
+      const wantsMakeup = window.confirm(
+        `Esta es la falta justificada #${used} de ${max} permitidas este año para ${serviceName}.\n\n¿Agregar una sesión de reposición una semana después de la última sesión programada?`
+      );
+      if (!wantsMakeup) return;
+
+      if (!catalogServiceId) {
+        toast.error('No se pudo determinar el servicio para agendar la reposición.');
+        return;
+      }
+
+      const { data: lastRows, error: lastErr } = await (supabase as any)
+        .from('attendance')
+        .select('session_date, scheduled_time')
+        .eq('organization_id', orgId)
+        .eq('beneficiary_id', beneficiaryId)
+        .eq('service_id', catalogServiceId)
+        .order('session_date', { ascending: false })
+        .limit(1);
+      if (lastErr) throw lastErr;
+
+      const last = lastRows?.[0];
+      if (!last) {
+        toast.error('No se encontró una sesión previa de esta terapia para calcular la reposición.');
+        return;
+      }
+
+      const makeupDate = offsetDate(last.session_date, 7);
+      const { error: insertErr } = await (supabase as any).from('attendance').insert({
+        organization_id: orgId,
+        beneficiary_id: beneficiaryId,
+        session_date: makeupDate,
+        status: 'scheduled',
+        service_id: catalogServiceId,
+        scheduled_time: last.scheduled_time,
+      });
+      if (insertErr) throw insertErr;
+
+      toast.success(`Sesión de reposición agendada para el ${formatDisplayDate(makeupDate)}.`, { duration: 4000 });
+      if (makeupDate === selectedDate) await loadSessions();
+    } catch (err: any) {
+      toast.error('Error al agendar la reposición: ' + err.message);
+    }
+  }, [selectedDate, loadSessions]);
+
   // ─── Mark attendance ───────────────────────────────────────────────────────
 
-  const handleMark = useCallback(async (
-    scheduleId: string,
-    beneficiaryId: string,
-    enrollmentServiceId: string,
-    status: AttendanceStatus,
-    scheduledTime: string
-  ) => {
+  const handleMark = useCallback(async (attendanceId: string, status: AttendanceStatus) => {
     if (!currentOrg) return;
-    const rowKey = `${scheduleId}-${beneficiaryId}`;
-    setSavingKey(rowKey);
+
+    const session = sessions.find(s => s.attendance_id === attendanceId);
+    if (session) {
+      if (session.status === 'justified') {
+        toast.error('Este registro ya fue justificado y no se puede modificar.');
+        return;
+      }
+      if (session.status !== 'scheduled' && status !== 'justified') {
+        toast.error('Ya fue registrado. Solo se puede corregir a "Justificado".');
+        return;
+      }
+    }
+
+    setSavingKey(attendanceId);
 
     try {
+      const wasAlreadyJustified = session?.status === 'justified';
       const actualArrival = status === 'late' ? nowTime() : null;
 
-      // Find existing attendance record
-      const session = sessions.find(s => s.schedule_id === scheduleId && s.beneficiary_id === beneficiaryId);
-      const existingId = session?.attendance_id;
-
-      if (existingId) {
-        // Update existing record
-        await (supabase as any)
-          .from('attendance')
-          .update({
-            status,
-            actual_arrival_time: actualArrival,
-            scheduled_time: scheduledTime,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existingId);
-      } else {
-        // Upsert using beneficiary_id + session_date unique constraint
-        // First check if exists (duplicate from another service same day)
-        const { data: existing } = await (supabase as any)
-          .from('attendance')
-          .select('id')
-          .eq('organization_id', currentOrg.id)
-          .eq('beneficiary_id', beneficiaryId)
-          .eq('session_date', selectedDate)
-          .eq('enrollment_schedule_id', scheduleId)
-          .maybeSingle();
-
-        if (existing) {
-          await (supabase as any).from('attendance').update({ status, actual_arrival_time: actualArrival }).eq('id', existing.id);
-        } else {
-          await (supabase as any).from('attendance').insert({
-            organization_id: currentOrg.id,
-            beneficiary_id: beneficiaryId,
-            session_date: selectedDate,
-            status,
-            enrollment_schedule_id: scheduleId,
-            scheduled_time: scheduledTime,
-            actual_arrival_time: actualArrival,
-            service_id: enrollmentServiceId,
-            recorded_by: user?.id ?? null,
-          });
-        }
-      }
+      const { error } = await (supabase as any)
+        .from('attendance')
+        .update({
+          status,
+          actual_arrival_time: actualArrival,
+          recorded_by: user?.id ?? null,
+        })
+        .eq('id', attendanceId);
+      if (error) throw error;
 
       toast.success(`${status === 'present' ? '✓ Presente' : status === 'late' ? '⏰ Tarde' : status === 'absent' ? '✗ Ausente' : 'Justificado'} registrado.`, { duration: 1500 });
       await loadSessions();
+
+      if (status === 'justified' && !wasAlreadyJustified && session) {
+        await offerMakeupSession(currentOrg.id, session.beneficiary_id, session.service_id, session.service_name);
+      }
     } catch (err: any) {
       toast.error('Error al registrar: ' + err.message);
     } finally {
       setSavingKey(null);
     }
-  }, [currentOrg, selectedDate, sessions, user, loadSessions]);
+  }, [currentOrg, sessions, loadSessions, offerMakeupSession]);
 
   // ─── Date navigation ──────────────────────────────────────────────────────
 
@@ -444,6 +480,15 @@ export function AsistenciaModule() {
             Solo se muestran los pacientes con sesión programada para el día seleccionado.
           </p>
         </div>
+        {currentOrg && (
+          <button
+            onClick={() => setShowHistory(true)}
+            className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-xl border border-indigo-200 transition-colors self-start"
+          >
+            <History className="w-4 h-4" />
+            Ver Historial
+          </button>
+        )}
       </div>
 
       {/* Date Navigator */}
@@ -509,7 +554,7 @@ export function AsistenciaModule() {
             </p>
           </div>
           <div className="text-sm text-slate-500 bg-indigo-50 border border-indigo-100 rounded-xl p-3 max-w-sm mx-auto">
-            💡 Para que aparezcan pacientes aquí, al crear la matrícula debes configurar los horarios de cada terapia (día y hora), o hacerlo desde el <strong>Detalle del Beneficiario → Inscripciones → Editar Horario</strong>.
+            💡 Para que aparezcan pacientes aquí, al crear la matrícula debes agregar las fechas exactas de cada sesión de terapia.
           </div>
         </div>
       ) : (
@@ -530,10 +575,15 @@ export function AsistenciaModule() {
                 {/* Mark all present shortcut */}
                 <button
                   onClick={async () => {
-                    const unregistered = sessions.filter(s => !s.attendance_status);
+                    const unregistered = sessions.filter(s => s.status === 'scheduled');
+                    const markable = unregistered.filter(s => canRegisterArrival(selectedDate, s.scheduled_time));
                     if (unregistered.length === 0) { toast('Todos ya tienen asistencia registrada.'); return; }
-                    for (const s of unregistered) {
-                      await handleMark(s.schedule_id, s.beneficiary_id, s.enrollment_service_id, 'present', s.start_time);
+                    if (markable.length === 0) { toast('Ninguna sesión sin registrar ya llegó a su hora todavía.'); return; }
+                    for (const s of markable) {
+                      await handleMark(s.attendance_id, 'present');
+                    }
+                    if (markable.length < unregistered.length) {
+                      toast(`${unregistered.length - markable.length} sesión(es) todavía no llegan a su hora — no se marcaron.`, { duration: 4000 });
                     }
                   }}
                   className="px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 transition"
@@ -546,8 +596,9 @@ export function AsistenciaModule() {
             <div className="divide-y divide-slate-50 p-4 space-y-2">
               {sessions.map(session => (
                 <SessionRow
-                  key={`${session.schedule_id}-${session.beneficiary_id}`}
+                  key={session.attendance_id}
                   session={session}
+                  selectedDate={selectedDate}
                   savingKey={savingKey}
                   onMark={handleMark}
                   onNavigate={(id) => navigate(`/app/beneficiarios/${id}`)}
@@ -556,6 +607,14 @@ export function AsistenciaModule() {
             </div>
           </div>
         </div>
+      )}
+
+      {currentOrg && (
+        <AttendanceHistoryModal
+          isOpen={showHistory}
+          onClose={() => setShowHistory(false)}
+          organizationId={currentOrg.id}
+        />
       )}
     </div>
   );

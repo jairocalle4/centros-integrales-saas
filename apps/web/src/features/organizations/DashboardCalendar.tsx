@@ -8,9 +8,11 @@ import {
   X,
 } from 'lucide-react';
 import { Link } from 'react-router';
+import { formatDateWithWeekday } from '../../lib/formatDate';
 
 import { CitaRapidaModal } from './CitaRapidaModal';
-import { Plus, UserPlus } from 'lucide-react';
+import { CitasHistorialModal } from './CitasHistorialModal';
+import { Plus, UserPlus, History } from 'lucide-react';
 
 type DayEvent = {
   type: 'attendance' | 'charge' | 'appointment' | 'scheduled_session';
@@ -34,6 +36,7 @@ export function DashboardCalendar() {
   const [loading, setLoading] = useState(false);
   const [selectedDay, setSelectedDay] = useState<{ dateStr: string; events: DayEvent[] } | null>(null);
   const [isCitaModalOpen, setIsCitaModalOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -57,7 +60,6 @@ export function DashboardCalendar() {
         { data: attendanceData },
         { data: chargesData },
         { data: appointmentsData },
-        { data: schedulesData }
       ] = await Promise.all([
         supabase
           .from('attendance')
@@ -100,25 +102,6 @@ export function DashboardCalendar() {
           .eq('organization_id', currentOrg.id)
           .gte('appointment_date', startDate)
           .lte('appointment_date', endDate),
-
-        (supabase as any)
-          .from('enrollment_schedules')
-          .select(`
-            id,
-            day_of_week,
-            start_time,
-            end_time,
-            enrollment_services!inner(
-              services(name),
-              enrollments!inner(
-                start_date,
-                end_date,
-                beneficiaries(first_name, last_name)
-              )
-            )
-          `)
-          .eq('organization_id', currentOrg.id)
-          .eq('is_active', true)
       ]);
 
       const map: Record<string, DayEvent[]> = {};
@@ -193,46 +176,6 @@ export function DashboardCalendar() {
         });
       }
 
-      if (schedulesData) {
-        // Iterate through all days in the month and add matching schedules
-        const lastDay = new Date(year, month + 1, 0).getDate();
-        for (let i = 1; i <= lastDay; i++) {
-          const date = new Date(year, month, i);
-          const dow = date.getDay(); // 0=Sun...6=Sat
-          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-
-          schedulesData.forEach((sch: any) => {
-            if (sch.day_of_week === dow) {
-              const enr = sch.enrollment_services?.enrollments;
-              if (enr) {
-                if (enr.start_date && dateStr < enr.start_date) return;
-                if (enr.end_date && dateStr > enr.end_date) return;
-              }
-              if (!map[dateStr]) map[dateStr] = [];
-
-              // Skip math projection if there's already an instantiated session for this schedule on this day
-              const hasInstantiated = map[dateStr].some(e => 
-                (e.type === 'scheduled_session' || e.type === 'attendance') && 
-                (e as any).enrollment_schedule_id === sch.id
-              );
-              if (hasInstantiated) return;
-
-              const svcName = sch.enrollment_services?.services?.name || 'Terapia';
-              const ben = enr?.beneficiaries;
-              const name = ben ? `${ben.first_name} ${ben.last_name}` : 'Paciente';
-              
-              map[dateStr].push({
-                type: 'scheduled_session',
-                id: sch.id,
-                title: `Sesión: ${name}`,
-                subtitle: svcName,
-                timeSlot: `${sch.start_time.substring(0, 5)} - ${sch.end_time.substring(0, 5)}`,
-              });
-            }
-          });
-        }
-      }
-
       setEventsMap(map);
     } catch (err) {
       console.error('Error cargando eventos del calendario:', err);
@@ -285,6 +228,13 @@ export function DashboardCalendar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsHistoryOpen(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            <History className="w-3.5 h-3.5" />
+            Historial de Citas
+          </button>
           <button
             onClick={handleToday}
             className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
@@ -457,12 +407,7 @@ export function DashboardCalendar() {
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  Agenda del {new Date(selectedDay.dateStr + 'T00:00:00').toLocaleDateString('es-EC', {
-                    weekday: 'long',
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
+                  Agenda del {formatDateWithWeekday(selectedDay.dateStr)}
                 </h3>
                 <p className="text-xs text-slate-500">
                   {selectedDay.events.length} evento(s) o recordatorio(s)
@@ -550,14 +495,21 @@ export function DashboardCalendar() {
                       <div className="pt-2 border-t border-indigo-200/50 flex flex-wrap items-center justify-between gap-2 text-xs">
                         <span className="text-[11px] text-indigo-700 font-medium">Acciones del Día:</span>
                         <div className="flex items-center gap-1.5">
-                          <Link
-                            to={`/app/matricula?appointmentId=${ev.id}&patientName=${encodeURIComponent(ev.patientName || '')}&repName=${encodeURIComponent(ev.representativeName || '')}&phone=${encodeURIComponent(ev.phone || '')}&depositAmount=${ev.amount || 0}`}
-                            onClick={() => setSelectedDay(null)}
-                            className="bg-indigo-600 text-white hover:bg-indigo-700 px-2.5 py-1 rounded font-semibold text-[11px] flex items-center gap-1 transition-colors shadow-xs"
-                          >
-                            <UserPlus className="w-3 h-3" />
-                            Matricular
-                          </Link>
+                          {ev.status === 'converted' ? (
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded font-semibold text-[11px] flex items-center gap-1">
+                              <UserPlus className="w-3 h-3" />
+                              Ya matriculado
+                            </span>
+                          ) : (
+                            <Link
+                              to={`/app/matricula?appointmentId=${ev.id}&patientName=${encodeURIComponent(ev.patientName || '')}&repName=${encodeURIComponent(ev.representativeName || '')}&phone=${encodeURIComponent(ev.phone || '')}&depositAmount=${ev.amount || 0}`}
+                              onClick={() => setSelectedDay(null)}
+                              className="bg-indigo-600 text-white hover:bg-indigo-700 px-2.5 py-1 rounded font-semibold text-[11px] flex items-center gap-1 transition-colors shadow-xs"
+                            >
+                              <UserPlus className="w-3 h-3" />
+                              Matricular
+                            </Link>
+                          )}
                         </div>
                       </div>
                     )}
@@ -580,6 +532,8 @@ export function DashboardCalendar() {
           }
         }}
       />
+      {/* Historial de Citas */}
+      <CitasHistorialModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
     </div>
   );
 }

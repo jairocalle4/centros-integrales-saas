@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { useNavigate } from 'react-router';
 import toast from 'react-hot-toast';
 import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
+import { SkeletonTable } from '../../components/ui/Skeleton';
+import { formatDate } from '../../lib/formatDate';
 import {
   Users,
   Plus,
@@ -48,7 +50,7 @@ type Beneficiary = {
   has_enrollment?: boolean;
 };
 
-type BeneficiaryFormState = {
+export type BeneficiaryFormState = {
   first_name: string;
   last_name: string;
   birth_date: string;
@@ -155,7 +157,7 @@ interface BeneficiaryModalProps {
   onSubmit: (form: BeneficiaryFormState, setActive?: boolean) => void;
 }
 
-function BeneficiaryModal({
+export function BeneficiaryModal({
   mode,
   initial,
   isActive,
@@ -224,7 +226,6 @@ function BeneficiaryModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto animate-fadeIn"
       style={{ background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden my-8 animate-popIn">
         
@@ -775,7 +776,7 @@ export function BeneficiariosModule() {
         photoConsent: b.photo_consent ?? true,
         therapies: (comData as any)?.selected_therapies || { lenguaje: true },
         paymentFrequency: (comData as any)?.payment_frequency || 'session',
-        signedDate: (comData as any)?.signed_at ? new Date((comData as any).signed_at).toLocaleDateString() : undefined,
+        signedDate: (comData as any)?.signed_at ? formatDate((comData as any).signed_at) : undefined,
         orgName: currentOrg?.name,
         city: currentOrg?.city || 'La Troncal'
       });
@@ -893,21 +894,21 @@ export function BeneficiariosModule() {
 
       if (benErr) throw benErr;
 
-      // 3. Update Link
-      if (repId) {
-        // Delete previous links and insert new link
+      // 3. Update primary representative link — only touch it if the
+      // selection actually changed, and never wipe other representatives
+      // linked to this beneficiary (managed from the beneficiary detail page).
+      if (repId && repId !== editTarget.representative?.id) {
         await supabase
           .from('beneficiary_representatives')
-          .delete()
+          .update({ is_primary: false })
           .eq('beneficiary_id', editTarget.id);
 
         await supabase
           .from('beneficiary_representatives')
-          .insert({
-            beneficiary_id: editTarget.id,
-            representative_id: repId,
-            is_primary: true,
-          });
+          .upsert(
+            { beneficiary_id: editTarget.id, representative_id: repId, is_primary: true },
+            { onConflict: 'beneficiary_id,representative_id' }
+          );
       }
 
       toast.success('Beneficiario actualizado exitosamente.');
@@ -982,9 +983,7 @@ export function BeneficiariosModule() {
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         {loading ? (
-          <div className="p-12 text-center text-slate-400 animate-pulse text-sm">
-            Cargando beneficiarios...
-          </div>
+          <SkeletonTable rows={6} columns={5} />
         ) : filtered.length === 0 ? (
           <EmptyState
             filtered={searchQuery.length > 0}

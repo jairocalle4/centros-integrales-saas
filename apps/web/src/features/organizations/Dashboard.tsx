@@ -32,7 +32,7 @@ type InviteForm = z.infer<typeof inviteSchema>;
 
 
 export function Dashboard() {
-  const { currentOrg, organizations, isLoading, refreshOrgs } = useOrg();
+  const { currentOrg, organizations, isLoading, refreshOrgs, hasElectronicBilling } = useOrg();
   // removed unused user from useAuth
   const [members, setMembers] = useState<Member[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
@@ -277,7 +277,7 @@ export function Dashboard() {
       
       {currentOrg && (
         <div className="mt-8">
-          <ElectronicBillingSettings orgId={currentOrg.id} />
+          <ElectronicBillingSettings orgId={currentOrg.id} hasElectronicBilling={hasElectronicBilling} />
         </div>
       )}
     </div>
