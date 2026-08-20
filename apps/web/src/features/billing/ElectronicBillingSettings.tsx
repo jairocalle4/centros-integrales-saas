@@ -1,20 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { ShieldCheck, Upload, FileKey2 } from 'lucide-react';
+import { ShieldCheck, Upload, FileKey2, Lock, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export function ElectronicBillingSettings({ orgId }: { orgId: string }) {
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // reader.result is a data: URL ("data:application/x-pkcs12;base64,XXXX") — strip the prefix.
+      const result = reader.result as string;
+      resolve(result.substring(result.indexOf(',') + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Error leyendo el archivo.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+export function ElectronicBillingSettings({ orgId, hasElectronicBilling }: { orgId: string; hasElectronicBilling: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
   const [config, setConfig] = useState({
-    environment: 'pruebas',
+    environment: 'pruebas' as 'pruebas' | 'produccion',
     establecimiento: '001',
     punto_emision: '001',
     cert_password_hash: ''
   });
-  
+  const [certUploaded, setCertUploaded] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     fetchConfig();
@@ -22,20 +36,20 @@ export function ElectronicBillingSettings({ orgId }: { orgId: string }) {
 
   const fetchConfig = async () => {
     try {
-      // @ts-ignore - The table is not yet in database.types.ts
       const { data } = await supabase
-        .from('sri_configurations' as any)
+        .from('sri_configurations')
         .select('*')
         .eq('organization_id', orgId)
         .maybeSingle();
 
       if (data) {
         setConfig({
-          environment: (data as any).environment,
-          establecimiento: (data as any).establecimiento,
-          punto_emision: (data as any).punto_emision,
+          environment: (data.environment as 'pruebas' | 'produccion') || 'pruebas',
+          establecimiento: data.establecimiento,
+          punto_emision: data.punto_emision,
           cert_password_hash: '' // No cargar la contraseña por seguridad
         });
+        setCertUploaded(Boolean(data.cert_uploaded_at));
       }
     } catch (err) {
       console.error(err);
@@ -46,31 +60,63 @@ export function ElectronicBillingSettings({ orgId }: { orgId: string }) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (selectedFile && !config.cert_password_hash) {
+      toast.error('Ingresa la contraseña del certificado para poder subirlo.');
+      return;
+    }
+
     setSaving(true);
-    
     try {
-      // 1. Si hay archivo, subirlo al storage de manera simulada
-      let certPath = null;
       if (selectedFile) {
-        // Mock de subida
-        certPath = `certs/${orgId}/${selectedFile.name}`;
+        // Uploading/replacing the certificate needs real symmetric
+        // encryption — only the .NET service (which holds
+        // MASTER_ENCRYPTION_KEY) ever touches the raw file, via the Edge
+        // Function acting as a verifying proxy.
+        const p12Base64 = await fileToBase64(selectedFile);
+        const { data, error } = await supabase.functions.invoke('electronic-billing', {
+          body: {
+            action: 'upload_certificate',
+            organization_id: orgId,
+            environment: config.environment,
+            establecimiento: config.establecimiento,
+            punto_emision: config.punto_emision,
+            p12_base64: p12Base64,
+            p12_password: config.cert_password_hash,
+          },
+        });
+        if (error || (data as any)?.error) {
+          // supabase.functions.invoke() only fills `data` on a 2xx response —
+          // on a non-2xx response `error.message` is a generic "Edge Function
+          // returned a non-2xx status code" and the real { error: "..." } body
+          // has to be read from error.context instead.
+          let errorMsg = (data as any)?.error || error?.message || 'Error desconocido.';
+          if (error?.context && typeof error.context === 'object') {
+            try {
+              const body = await (error.context as any).text();
+              const parsed = JSON.parse(body);
+              errorMsg = parsed.error || body;
+            } catch { /* keep errorMsg as-is if the body isn't JSON */ }
+          }
+          throw new Error(errorMsg);
+        }
+        toast.success('Firma electrónica subida y cifrada correctamente.');
+      } else {
+        // No new file — just persist ambiente/establecimiento/punto de
+        // emisión, leaving any already-uploaded certificate untouched.
+        const { error } = await supabase
+          .from('sri_configurations')
+          .upsert(
+            { organization_id: orgId, environment: config.environment, establecimiento: config.establecimiento, punto_emision: config.punto_emision },
+            { onConflict: 'organization_id' }
+          );
+        if (error) throw error;
+        toast.success('Configuración guardada.');
       }
 
-      // @ts-ignore - The table is not yet in database.types.ts
-      const { error } = await supabase
-        .from('sri_configurations' as any)
-        .upsert({
-          organization_id: orgId,
-          environment: config.environment,
-          establecimiento: config.establecimiento,
-          punto_emision: config.punto_emision,
-          cert_storage_path: certPath,
-          cert_password_hash: config.cert_password_hash // TODO: Encriptar en la Edge Function real
-        });
-
-      if (error) throw error;
-      toast.success('Configuración guardada exitosamente (Simulación Sprint 0)');
-      
+      setSelectedFile(null);
+      setConfig(c => ({ ...c, cert_password_hash: '' }));
+      await fetchConfig();
     } catch (err: any) {
       toast.error('Error al guardar: ' + err.message);
     } finally {
@@ -78,23 +124,22 @@ export function ElectronicBillingSettings({ orgId }: { orgId: string }) {
     }
   };
 
-  const testEdgeFunction = async () => {
-    try {
-      const { data, error } = await supabase.functions.invoke('electronic-billing', {
-        body: {
-          organization_id: orgId,
-          payload: { total: 100, cliente_identificacion: '1234567890' }
-        }
-      });
-      if (error) throw error;
-      toast.success('Respuesta del Mock SRI recibida exitosamente');
-      console.log('Mock SRI Response:', data);
-    } catch (err: any) {
-      toast.error('Error al probar Edge Function: ' + err.message);
-    }
-  };
-
   if (loading) return <div className="p-4 text-slate-500">Cargando configuración SRI...</div>;
+
+  if (!hasElectronicBilling) {
+    return (
+      <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mx-auto mb-4">
+          <Lock className="w-6 h-6" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-900">Facturación electrónica no incluida en tu plan</h2>
+        <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto">
+          Este centro no tiene habilitado el módulo de facturación electrónica SRI en su plan de suscripción actual.
+          Contacta al equipo de NexoKids para actualizar tu plan.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -110,48 +155,66 @@ export function ElectronicBillingSettings({ orgId }: { orgId: string }) {
         </div>
 
         <form onSubmit={handleSave} className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/*
+            TEMPORAL — mientras se hacen las pruebas reales con el SRI, el
+            centro también puede fijar su ambiente aquí (además del panel de
+            superadmin). Cuando las pruebas queden validadas, comentar/quitar
+            este bloque y dejar el control únicamente en superadmin — ver
+            PlatformOrganizationDetail.tsx.
+          */}
+          <div className="max-w-xs">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Ambiente</label>
+            <select
+              value={config.environment}
+              onChange={e => setConfig({ ...config, environment: e.target.value as 'pruebas' | 'produccion' })}
+              className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="pruebas">Pruebas (celcer.sri.gob.ec)</option>
+              <option value="produccion">Producción (cel.sri.gob.ec)</option>
+            </select>
+            <p className="text-xs text-slate-400 mt-1">
+              Déjalo en "Pruebas" hasta que tus facturas de prueba queden autorizadas por el SRI.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 max-w-sm">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Ambiente</label>
-              <select
-                value={config.environment}
-                onChange={e => setConfig({ ...config, environment: e.target.value })}
+              <label className="block text-sm font-medium text-slate-700 mb-1">Establecimiento</label>
+              <input
+                type="text"
+                maxLength={3}
+                value={config.establecimiento}
+                onChange={e => setConfig({ ...config, establecimiento: e.target.value })}
                 className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="pruebas">Pruebas</option>
-                <option value="produccion">Producción</option>
-              </select>
+              />
             </div>
-            
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Establecimiento</label>
-                <input
-                  type="text"
-                  maxLength={3}
-                  value={config.establecimiento}
-                  onChange={e => setConfig({ ...config, establecimiento: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Pto. Emisión</label>
-                <input
-                  type="text"
-                  maxLength={3}
-                  value={config.punto_emision}
-                  onChange={e => setConfig({ ...config, punto_emision: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Pto. Emisión</label>
+              <input
+                type="text"
+                maxLength={3}
+                value={config.punto_emision}
+                onChange={e => setConfig({ ...config, punto_emision: e.target.value })}
+                className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
           </div>
 
           <div className="border-t border-slate-200 pt-5">
-            <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-              <FileKey2 className="w-4 h-4 text-slate-500" />
-              Firma Electrónica (.p12)
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <FileKey2 className="w-4 h-4 text-slate-500" />
+                Firma Electrónica (.p12)
+              </h3>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                certUploaded ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+              }`}>
+                {certUploaded ? 'Firma subida' : 'Sin firma subida'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Debes subir la firma electrónica antes de poder emitir facturas — sin esto, los botones de facturar no aparecerán al registrar pagos.
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Archivo de Certificado</label>
@@ -166,25 +229,30 @@ export function ElectronicBillingSettings({ orgId }: { orgId: string }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña del Certificado</label>
-                <input
-                  type="password"
-                  placeholder="Dejar en blanco para mantener actual"
-                  value={config.cert_password_hash}
-                  onChange={e => setConfig({ ...config, cert_password_hash: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder={selectedFile ? 'Requerida para subir el archivo' : 'Selecciona un archivo primero'}
+                    disabled={!selectedFile}
+                    value={config.cert_password_hash}
+                    onChange={e => setConfig({ ...config, cert_password_hash: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 pr-10 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    disabled={!selectedFile}
+                    tabIndex={-1}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 disabled:text-slate-300 focus:outline-none"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-5 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={testEdgeFunction}
-              className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-2"
-            >
-              Probar Emisión (Mock)
-            </button>
             <button
               type="submit"
               disabled={saving}

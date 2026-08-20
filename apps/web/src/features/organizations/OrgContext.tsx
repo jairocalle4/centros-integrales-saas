@@ -19,6 +19,9 @@ interface OrgContextType {
   organizations: Organization[];
   isLoading: boolean;
   isActive: boolean | null;
+  currentRole: string | null;
+  hasElectronicBilling: boolean;
+  hasSriCertificate: boolean;
   refreshOrgs: () => Promise<void>;
 }
 
@@ -38,6 +41,9 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [isLoading, setIsLoading] = useState(!currentOrg);
   const [isActive, setIsActive] = useState<boolean | null>(null);
+  const [currentRole, setCurrentRole] = useState<string | null>(null);
+  const [hasElectronicBilling, setHasElectronicBilling] = useState(false);
+  const [hasSriCertificate, setHasSriCertificate] = useState(false);
 
   const fetchOrgs = async () => {
     if (!session) return;
@@ -52,12 +58,19 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
     if (!error && data) {
       setOrganizations(data);
-      // Auto-select if we only have one or none is selected and we have some
       if (data.length > 0 && !currentOrg) {
-        // Optionally, we could load the last selected from localStorage here
         const savedOrgId = localStorage.getItem('nexo_current_org_id');
         const savedOrg = data.find(o => o.id === savedOrgId);
-        setCurrentOrg(savedOrg || data[0]);
+        if (savedOrg) {
+          // Returning user: restore their last active organization.
+          setCurrentOrg(savedOrg);
+        } else if (data.length === 1) {
+          // Only one membership: nothing to choose, select it directly.
+          setCurrentOrg(data[0]);
+        }
+        // Otherwise (first login, multiple active memberships, no prior
+        // selection): leave currentOrg null so UserLayout forces an
+        // explicit choice instead of silently picking the newest one.
       }
     }
     setIsLoading(false);
@@ -86,6 +99,59 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     checkActive();
   }, [currentOrg]);
 
+  useEffect(() => {
+    async function loadElectronicBillingEntitlement() {
+      if (!currentOrg) { setHasElectronicBilling(false); return; }
+      const { data: subscription } = await supabase
+        .from('subscriptions')
+        .select('plan_id')
+        .eq('organization_id', currentOrg.id)
+        .maybeSingle();
+      if (!subscription?.plan_id) { setHasElectronicBilling(false); return; }
+
+      const { data: plan } = await supabase
+        .from('subscription_plans')
+        .select('features')
+        .eq('id', subscription.plan_id)
+        .maybeSingle();
+      setHasElectronicBilling(Boolean((plan?.features as any)?.has_electronic_billing));
+    }
+    loadElectronicBillingEntitlement();
+  }, [currentOrg]);
+
+  useEffect(() => {
+    async function loadSriCertificateStatus() {
+      if (!currentOrg) { setHasSriCertificate(false); return; }
+      // Owner/admin only, per sri_configurations RLS — staff/professional
+      // simply won't see this as configured, matching that they also
+      // can't emit invoices (sri_documents insert is owner/admin only too).
+      const { data } = await supabase
+        .from('sri_configurations')
+        .select('cert_uploaded_at')
+        .eq('organization_id', currentOrg.id)
+        .maybeSingle();
+      setHasSriCertificate(Boolean(data?.cert_uploaded_at));
+    }
+    loadSriCertificateStatus();
+  }, [currentOrg]);
+
+  useEffect(() => {
+    async function loadRole() {
+      if (!currentOrg || !session?.user.id) {
+        setCurrentRole(null);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('organization_members')
+        .select('role')
+        .eq('organization_id', currentOrg.id)
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+      setCurrentRole(!error && data ? data.role : null);
+    }
+    loadRole();
+  }, [currentOrg, session]);
+
   const handleSetCurrentOrg = (org: Organization) => {
     setCurrentOrg(org);
     localStorage.setItem('nexo_current_org_id', org.id); // Keep for legacy
@@ -96,10 +162,13 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     <OrgContext.Provider value={{ 
       currentOrg, 
       setCurrentOrg: handleSetCurrentOrg, 
-      organizations, 
+      organizations,
       isLoading,
       isActive,
-      refreshOrgs: fetchOrgs 
+      currentRole,
+      hasElectronicBilling,
+      hasSriCertificate,
+      refreshOrgs: fetchOrgs
     }}>
       {children}
     </OrgContext.Provider>

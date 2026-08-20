@@ -1,9 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router';
 import { supabase } from '../../lib/supabase';
-import { Building2, ArrowLeft, Users, Mail, CreditCard, Trash2, ShieldCheck, Check, Clock, AlertCircle, PackageCheck } from 'lucide-react';
+import { Building2, ArrowLeft, Users, Mail, CreditCard, Trash2, ShieldCheck, Check, Clock, AlertCircle, PackageCheck, FileKey2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { formatDate } from '../../lib/formatDate';
+
+type SriConfig = {
+  environment: 'pruebas' | 'produccion';
+  establecimiento: string;
+  punto_emision: string;
+  cert_uploaded_at: string | null;
+};
 
 type Organization = {
   id: string;
@@ -48,7 +56,12 @@ export function PlatformOrganizationDetail() {
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [invitations, setInvitations] = useState<OrgInvitation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'members' | 'invitations' | 'payments'>('members');
+  const [activeTab, setActiveTab] = useState<'members' | 'invitations' | 'payments' | 'billing'>('members');
+
+  // Facturación electrónica SRI
+  const [sriConfig, setSriConfig] = useState<SriConfig | null>(null);
+  const [sriEnvironment, setSriEnvironment] = useState<'pruebas' | 'produccion'>('pruebas');
+  const [savingSriEnv, setSavingSriEnv] = useState(false);
 
   // Modales
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -127,6 +140,15 @@ export function PlatformOrganizationDetail() {
       if (invError) throw invError;
       setInvitations((invData as unknown as OrgInvitation[]) || []);
 
+      // 6. Obtener configuración SRI (si el centro ya la configuró)
+      const { data: sriData } = await supabase
+        .from('sri_configurations')
+        .select('environment, establecimiento, punto_emision, cert_uploaded_at')
+        .eq('organization_id', orgId)
+        .maybeSingle();
+      setSriConfig((sriData as SriConfig) || null);
+      if (sriData) setSriEnvironment((sriData as SriConfig).environment);
+
     } catch (err: any) {
       console.error('Error loading details:', err);
     } finally {
@@ -155,6 +177,24 @@ export function PlatformOrganizationDetail() {
   useEffect(() => {
     loadDetails();
   }, [loadDetails]);
+
+  const handleSaveSriEnvironment = async () => {
+    if (!orgId) return;
+    setSavingSriEnv(true);
+    try {
+      const { error } = await supabase
+        .from('sri_configurations')
+        .update({ environment: sriEnvironment })
+        .eq('organization_id', orgId);
+      if (error) throw error;
+      toast.success('Ambiente SRI actualizado.');
+      await loadDetails();
+    } catch (err: any) {
+      toast.error('Error al guardar el ambiente: ' + err.message);
+    } finally {
+      setSavingSriEnv(false);
+    }
+  };
 
   const handleInviteOwner = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,11 +245,12 @@ export function PlatformOrganizationDetail() {
     
     setIsSubmittingPayment(true);
     try {
-      const { error } = await supabase.rpc('register_payment', {
-        p_organization_id: orgId,
+      const { error } = await supabase.rpc('superadmin_register_payment', {
+        p_org_id: orgId,
         p_amount: Number(paymentAmount),
-        p_cycle: paymentCycle,
-        p_reference: 'Pago manual desde panel superadmin'
+        p_billing_cycle: paymentCycle,
+        p_reference: 'Pago manual desde panel superadmin',
+        p_notes: '',
       });
       if (error) throw error;
       toast.success('Pago registrado exitosamente.');
@@ -288,6 +329,16 @@ export function PlatformOrganizationDetail() {
           </div>
           {activeTab === 'payments' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600 rounded-t-full" />}
         </button>
+        <button
+          onClick={() => setActiveTab('billing')}
+          className={`pb-4 text-sm font-medium transition-colors relative ${activeTab === 'billing' ? 'text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          <div className="flex items-center gap-2">
+            <FileKey2 className="w-4 h-4" />
+            Facturación Electrónica
+          </div>
+          {activeTab === 'billing' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600 rounded-t-full" />}
+        </button>
       </div>
 
       {/* Contenido Tabs */}
@@ -337,7 +388,7 @@ export function PlatformOrganizationDetail() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-slate-400">
-                          {new Date(u.created_at).toLocaleDateString()}
+                          {formatDate(u.created_at)}
                         </td>
                       </tr>
                     ))}
@@ -403,7 +454,7 @@ export function PlatformOrganizationDetail() {
                           )}
                         </td>
                         <td className="px-6 py-4 text-slate-400">
-                          {new Date(i.created_at).toLocaleDateString()}
+                          {formatDate(i.created_at)}
                         </td>
                         <td className="px-6 py-4 text-right">
                           {i.status === 'pending' && (
@@ -518,6 +569,65 @@ export function PlatformOrganizationDetail() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'billing' && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 max-w-lg">
+            <h3 className="font-semibold text-slate-800 text-lg mb-1 flex items-center gap-2">
+              <FileKey2 className="w-5 h-5 text-indigo-500" />
+              Ambiente SRI
+            </h3>
+            <p className="text-sm text-slate-500 mb-5">
+              Controla si las facturas de este centro se emiten contra el ambiente de pruebas o el de producción del SRI. El centro también puede editar esto temporalmente desde su Configuración mientras se validan las pruebas.
+            </p>
+
+            {!sriConfig ? (
+              <div className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                Este centro todavía no tiene ninguna configuración SRI guardada — el dueño debe entrar a{' '}
+                <strong>Configuración → Facturación Electrónica</strong> dentro del centro y guardar al menos el establecimiento/punto de emisión (o subir su firma) una vez. Recién ahí aparece aquí el control de ambiente.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-5 text-sm">
+                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Establecimiento</p>
+                    <p className="font-bold text-slate-900">{sriConfig.establecimiento}</p>
+                  </div>
+                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Pto. Emisión</p>
+                    <p className="font-bold text-slate-900">{sriConfig.punto_emision}</p>
+                  </div>
+                </div>
+                <div className={`mb-5 text-xs font-bold px-3 py-2 rounded-lg border inline-flex items-center gap-1.5 ${
+                  sriConfig.cert_uploaded_at ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                }`}>
+                  {sriConfig.cert_uploaded_at ? '✓ Firma electrónica subida' : '⚠ Sin firma electrónica subida'}
+                </div>
+
+                <label className="block text-sm font-medium text-slate-700 mb-1">Ambiente</label>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={sriEnvironment}
+                    onChange={(e) => setSriEnvironment(e.target.value as 'pruebas' | 'produccion')}
+                    className="flex-1 bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="pruebas">Pruebas (celcer.sri.gob.ec)</option>
+                    <option value="produccion">Producción (cel.sri.gob.ec)</option>
+                  </select>
+                  <button
+                    onClick={handleSaveSriEnvironment}
+                    disabled={savingSriEnv || sriEnvironment === sriConfig.environment}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {savingSriEnv ? 'Guardando...' : 'Guardar'}
+                  </button>
+                </div>
+                {sriEnvironment === 'produccion' && (
+                  <p className="mt-2 text-xs text-red-600 font-medium">⚠ Producción emite facturas reales y válidas ante el SRI — confirma que las pruebas ya quedaron autorizadas antes de activarlo.</p>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

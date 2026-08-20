@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
+import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
+import { Skeleton, SkeletonCircle } from '../../components/ui/Skeleton';
 import {
   ArrowLeft,
   Baby,
@@ -23,9 +25,18 @@ import {
   Edit2,
   Upload,
   GraduationCap,
+  CalendarCheck,
 } from 'lucide-react';
 import { ActaCompromisoModal } from './ActaCompromisoModal';
 import type { CommitmentData } from './ActaCompromisoModal';
+import { BeneficiaryModal } from './BeneficiariosModule';
+import type { BeneficiaryFormState } from './BeneficiariosModule';
+import { PaymentDetailModal, RegisterPaymentModal } from './PaymentDetailModal';
+import type { Payment } from './PaymentDetailModal';
+import { AttendanceHistoryTable, resolveRecordedByNames } from './AttendanceHistory';
+import type { AttendanceHistoryRow } from './AttendanceHistory';
+import { InvoiceEnrollmentModal } from './InvoiceEnrollmentModal';
+import { formatDate, formatDateWithWeekday } from '../../lib/formatDate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,7 +57,7 @@ type ScheduleSlot = {
   end_time: string;
 };
 
-type Tab = 'resumen' | 'inscripciones' | 'progreso' | 'cobros';
+type Tab = 'resumen' | 'inscripciones' | 'progreso' | 'cobros' | 'asistencia';
 
 type Beneficiary = {
   id: string;
@@ -54,7 +65,7 @@ type Beneficiary = {
   last_name: string;
   birth_date: string | null;
   consultation_reason: string | null;
-  photo_consent: boolean;
+  photo_consent: boolean | null;
   photo_url: string | null;
   notes: string | null;
   is_active: boolean;
@@ -106,12 +117,14 @@ type SessionNote = {
 
 type Charge = {
   id: string;
+  organization_id: string;
   description: string;
   amount: number;
   due_date: string | null;
   status: string;
   period_label: string | null;
   paid_amount?: number;
+  payments: Payment[];
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -153,105 +166,6 @@ function chargeStatusColor(status: string) {
 
 function chargeStatusLabel(status: string) {
   return status === 'paid' ? 'Pagado' : status === 'partial' ? 'Parcial' : 'Pendiente';
-}
-
-// ─── Payment Modal ────────────────────────────────────────────────────────────
-
-interface PaymentModalProps {
-  charge: Charge;
-  organizationId: string;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-function PaymentModal({ charge, organizationId, onClose, onSuccess }: PaymentModalProps) {
-  const [amount, setAmount] = useState<string>('');
-  const [method, setMethod] = useState<'cash' | 'transfer' | 'card' | 'other'>('cash');
-  const [reference, setReference] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const remaining = charge.amount - (charge.paid_amount || 0);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const val = Number(amount);
-    if (!val || val <= 0) { toast.error('Ingresa un monto válido.'); return; }
-    if (val > remaining) { toast.error(`El abono no puede superar el saldo pendiente de $${remaining.toFixed(2)}.`); return; }
-
-    setSubmitting(true);
-    try {
-      await supabase.from('internal_payments').insert({
-        organization_id: organizationId,
-        charge_id: charge.id,
-        amount: val,
-        payment_date: new Date().toISOString().split('T')[0],
-        method,
-        reference: reference.trim() || null,
-      });
-      toast.success('Pago registrado exitosamente.');
-      onSuccess();
-      onClose();
-    } catch (err: any) {
-      toast.error('Error al registrar el pago: ' + err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-sm p-6 space-y-4 animate-popIn">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-slate-900">Registrar Abono / Pago</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-        </div>
-
-        <div className="bg-slate-50 rounded-xl p-3 text-xs font-medium text-slate-600 space-y-1">
-          <p>Cargo: <strong className="text-slate-900">{charge.description}</strong></p>
-          <p>Total: <strong className="font-mono">${charge.amount.toFixed(2)}</strong></p>
-          <p>Pagado: <strong className="font-mono text-emerald-700">${(charge.paid_amount || 0).toFixed(2)}</strong></p>
-          <p>Saldo Pendiente: <strong className="font-mono text-red-700">${remaining.toFixed(2)}</strong></p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Monto del Abono ($) <span className="text-red-500">*</span></label>
-            <input
-              type="number" step="0.01" min="0.01" max={remaining}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder={`Máx. $${remaining.toFixed(2)}`}
-              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500"
-              autoFocus
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Método de Pago</label>
-            <select value={method} onChange={(e) => setMethod(e.target.value as any)}
-              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
-              <option value="cash">💵 Efectivo</option>
-              <option value="transfer">🏦 Transferencia</option>
-              <option value="card">💳 Tarjeta</option>
-              <option value="other">🔄 Otro</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Referencia (opcional)</label>
-            <input type="text" value={reference} onChange={(e) => setReference(e.target.value)}
-              placeholder="Nº transferencia, comprobante..."
-              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 py-2 text-sm font-bold text-slate-600 border border-slate-300 rounded-xl hover:bg-slate-50">Cancelar</button>
-            <button type="submit" disabled={submitting}
-              className="flex-1 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition disabled:opacity-50">
-              {submitting ? 'Guardando...' : 'Registrar Pago'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
 }
 
 // ─── Session Note Form ─────────────────────────────────────────────────────────
@@ -389,26 +303,224 @@ function NoteForm({ beneficiaryId, organizationId, enrollmentServices, onClose, 
   );
 }
 
+// ─── Link Representative Modal ─────────────────────────────────────────────────
+
+interface LinkRepresentativeModalProps {
+  organizationId: string;
+  candidates: Representative[]; // org representatives not yet linked to this beneficiary
+  saving: boolean;
+  onClose: () => void;
+  onSelectExisting: (repId: string) => void;
+  onCreated: (repId: string) => void;
+}
+
+function LinkRepresentativeModal({
+  organizationId,
+  candidates,
+  saving,
+  onClose,
+  onSelectExisting,
+  onCreated,
+}: LinkRepresentativeModalProps) {
+  const [mode, setMode] = useState<'search' | 'create'>('search');
+  const [selected, setSelected] = useState<Representative | null>(null);
+  const [form, setForm] = useState({ first_name: '', last_name: '', identification: '', phone: '', email: '', relationship: 'Madre' });
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.first_name.trim() || !form.last_name.trim()) {
+      toast.error('Ingresa nombres y apellidos del representante.');
+      return;
+    }
+    setCreating(true);
+    try {
+      const { data, error } = await supabase
+        .from('representatives')
+        .insert({
+          organization_id: organizationId,
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          identification: form.identification.trim() || null,
+          phone: form.phone.trim() || null,
+          email: form.email.trim() || null,
+          relationship: form.relationship || 'Madre',
+          is_active: true,
+        })
+        .select('id')
+        .single();
+      if (error) throw error;
+      onCreated(data.id);
+    } catch (err: any) {
+      toast.error('Error al crear representante: ' + err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md my-8 animate-popIn">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <h3 className="font-bold text-slate-900 flex items-center gap-2">
+            <Users className="w-5 h-5 text-indigo-600" />
+            Vincular Representante
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 rounded-lg p-1"><X size={18} /></button>
+        </div>
+
+        <div className="px-6 pt-4">
+          <div className="flex rounded-lg bg-slate-100 p-1 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setMode('search')}
+              className={`flex-1 py-1.5 text-center rounded-md transition-all cursor-pointer ${mode === 'search' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Buscar Existente
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('create')}
+              className={`flex-1 py-1.5 text-center rounded-md transition-all cursor-pointer ${mode === 'create' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              + Crear Nuevo
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {mode === 'search' ? (
+            candidates.length === 0 ? (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs">
+                No hay más representantes registrados en el centro para vincular. Usa <strong>"+ Crear Nuevo"</strong>.
+              </div>
+            ) : (
+              <>
+                <EntityAutocomplete<Representative>
+                  placeholder="Escribe cédula o nombre del tutor..."
+                  fetchResults={async (query) => {
+                    const q = query.toLowerCase();
+                    return candidates.filter(r =>
+                      (r.identification || '').includes(q) ||
+                      `${r.first_name} ${r.last_name}`.toLowerCase().includes(q)
+                    ).slice(0, 8);
+                  }}
+                  selectedItem={selected}
+                  onSelect={setSelected}
+                  renderItem={(r) => (
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
+                        {r.first_name[0]}{r.last_name[0]}
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-900 text-sm">{r.first_name} {r.last_name}</p>
+                        {r.identification && <p className="text-[11px] text-slate-500 font-mono">CI: {r.identification}</p>}
+                      </div>
+                    </div>
+                  )}
+                  renderSelected={(r) => <p>{r.first_name} {r.last_name} {r.identification ? `(CI: ${r.identification})` : ''}</p>}
+                />
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancelar</button>
+                  <button
+                    type="button"
+                    disabled={!selected || saving}
+                    onClick={() => selected && onSelectExisting(selected.id)}
+                    className="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 cursor-pointer"
+                  >
+                    {saving ? 'Vinculando...' : 'Vincular'}
+                  </button>
+                </div>
+              </>
+            )
+          ) : (
+            <form onSubmit={handleCreate} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Nombres *</label>
+                  <input type="text" value={form.first_name} onChange={(e) => setForm(f => ({ ...f, first_name: e.target.value }))}
+                    className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Apellidos *</label>
+                  <input type="text" value={form.last_name} onChange={(e) => setForm(f => ({ ...f, last_name: e.target.value }))}
+                    className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cédula</label>
+                  <input type="text" maxLength={10} value={form.identification} onChange={(e) => setForm(f => ({ ...f, identification: e.target.value.replace(/\D/g, '') }))}
+                    className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Parentesco</label>
+                  <select value={form.relationship} onChange={(e) => setForm(f => ({ ...f, relationship: e.target.value }))}
+                    className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="Madre">Madre</option>
+                    <option value="Padre">Padre</option>
+                    <option value="Tutor Legal">Tutor Legal</option>
+                    <option value="Abuelo/a">Abuelo/a</option>
+                    <option value="Otro">Otro</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Teléfono</label>
+                  <input type="text" maxLength={10} value={form.phone} onChange={(e) => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '') }))}
+                    className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Correo</label>
+                  <input type="email" value={form.email} onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
+                    className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancelar</button>
+                <button type="submit" disabled={creating || saving} className="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 cursor-pointer">
+                  {creating || saving ? 'Guardando...' : 'Crear y Vincular'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function BeneficiaryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentOrg } = useOrg();
+  const { currentOrg, hasElectronicBilling, hasSriCertificate } = useOrg();
+  const canEmitInvoices = hasElectronicBilling && hasSriCertificate;
   const [activeTab, setActiveTab] = useState<Tab>('resumen');
   const [loading, setLoading] = useState(true);
 
   const [beneficiary, setBeneficiary] = useState<Beneficiary | null>(null);
   const [representatives, setRepresentatives] = useState<Representative[]>([]);
+  const [orgRepresentatives, setOrgRepresentatives] = useState<Representative[]>([]);
+  const [showLinkRepModal, setShowLinkRepModal] = useState(false);
+  const [savingRepLink, setSavingRepLink] = useState(false);
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [sessionNotes, setSessionNotes] = useState<SessionNote[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
+  const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryRow[]>([]);
+  const [invoicingEnrollmentId, setInvoicingEnrollmentId] = useState<string | null>(null);
 
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<Charge | null>(null);
+  const [viewingCharge, setViewingCharge] = useState<Charge | null>(null);
   const [actaData, setActaData] = useState<CommitmentData | null>(null);
   const [isActaOpen, setIsActaOpen] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoDisplayUrl, setPhotoDisplayUrl] = useState<string | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   // All enrollment services across all active enrollments
   const allEnrollmentServices = enrollments.flatMap(e => e.services);
@@ -434,6 +546,15 @@ export function BeneficiaryDetailPage() {
         .select('representatives(*)')
         .eq('beneficiary_id', id);
       setRepresentatives((repLinks || []).map((r: any) => r.representatives).filter(Boolean));
+
+      // All active representatives in the org, for the "add another" picker
+      const { data: allReps } = await supabase
+        .from('representatives')
+        .select('*')
+        .eq('organization_id', currentOrg.id)
+        .eq('is_active', true)
+        .order('first_name', { ascending: true });
+      setOrgRepresentatives((allReps as any) || []);
 
       // Enrollments with services and schedules
       const { data: enrData } = await (supabase as any)
@@ -475,16 +596,41 @@ export function BeneficiaryDetailPage() {
         .order('session_date', { ascending: false });
       setSessionNotes((notes as any) || []);
 
-      // Charges with paid amounts
+      // Charges with their full payment history
       const { data: chargesData } = await supabase
         .from('charges')
-        .select('*, internal_payments(amount)')
+        .select('*, internal_payments(*)')
         .eq('beneficiary_id', id)
         .order('created_at', { ascending: false });
 
       setCharges((chargesData || []).map((c: any) => ({
         ...c,
+        payments: c.internal_payments || [],
         paid_amount: (c.internal_payments || []).reduce((sum: number, p: any) => sum + (p.amount || 0), 0),
+      })));
+
+      // Attendance history — the audit trail behind this beneficiary's
+      // presente/tarde/ausente/justificado record, used to resolve
+      // representative disputes about a specific day.
+      const { data: attData } = await (supabase as any)
+        .from('attendance')
+        .select('id, session_date, scheduled_time, status, actual_arrival_time, recorded_by, services ( name )')
+        .eq('beneficiary_id', id)
+        .order('session_date', { ascending: false })
+        .order('scheduled_time', { ascending: true });
+
+      const recordedByNames = await resolveRecordedByNames((attData ?? []).map((r: any) => r.recorded_by));
+
+      setAttendanceHistory((attData ?? []).map((r: any) => ({
+        id: r.id,
+        session_date: r.session_date,
+        scheduled_time: r.scheduled_time ?? '00:00:00',
+        status: r.status,
+        actual_arrival_time: r.actual_arrival_time,
+        service_name: r.services?.name ?? '—',
+        beneficiary_id: id,
+        beneficiary_name: '',
+        recorded_by_name: r.recorded_by ? recordedByNames[r.recorded_by] ?? '—' : null,
       })));
 
     } catch (err) {
@@ -497,6 +643,19 @@ export function BeneficiaryDetailPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // The beneficiary-photos bucket is private (RLS-gated by organization
+  // membership); `photo_url` stores the storage path, not a public URL, so
+  // it must be resolved to a short-lived signed URL before rendering.
+  useEffect(() => {
+    const path = beneficiary?.photo_url;
+    if (!path) { setPhotoDisplayUrl(null); return; }
+    let cancelled = false;
+    supabase.storage.from('beneficiary-photos').createSignedUrl(path, 3600).then(({ data }) => {
+      if (!cancelled) setPhotoDisplayUrl(data?.signedUrl ?? null);
+    });
+    return () => { cancelled = true; };
+  }, [beneficiary?.photo_url]);
+
   // ─── Photo Upload ─────────────────────────────────────────────────────────────
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -508,14 +667,112 @@ export function BeneficiaryDetailPage() {
       const path = `${id}/photo.${ext}`;
       const { error: uploadErr } = await supabase.storage.from('beneficiary-photos').upload(path, file, { upsert: true });
       if (uploadErr) throw uploadErr;
-      const { data: urlData } = supabase.storage.from('beneficiary-photos').getPublicUrl(path);
-      await supabase.from('beneficiaries').update({ photo_url: urlData.publicUrl }).eq('id', id);
+      await supabase.from('beneficiaries').update({ photo_url: path }).eq('id', id);
       toast.success('Foto actualizada correctamente.');
       await loadAll();
     } catch (err: any) {
       toast.error('Error al subir foto: ' + err.message);
     } finally {
       setUploadingPhoto(false);
+    }
+  };
+
+  // ─── Editar beneficiario ────────────────────────────────────────────────────────
+
+  const handleEditSubmit = async (form: BeneficiaryFormState, setActive?: boolean) => {
+    if (!id) return;
+    setEditSubmitting(true);
+    try {
+      let repId = form.selected_rep_id;
+
+      if (form.rep_mode === 'new') {
+        const { data: newRep, error: repErr } = await supabase
+          .from('representatives')
+          .insert({
+            organization_id: currentOrg!.id,
+            first_name: form.rep_first_name.trim(),
+            last_name: form.rep_last_name.trim(),
+            identification: form.rep_cedula.trim(),
+            phone: form.rep_phone.trim(),
+            email: form.rep_email.trim() || null,
+            relationship: form.rep_relationship || 'Madre',
+            is_active: true,
+          })
+          .select('id')
+          .single();
+        if (repErr) throw repErr;
+        repId = newRep.id;
+      }
+
+      const { error: benErr } = await supabase
+        .from('beneficiaries')
+        .update({
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          birth_date: form.birth_date || null,
+          consultation_reason: form.consultation_reason.trim() || null,
+          photo_consent: form.photo_consent,
+          notes: form.notes.trim() || null,
+          is_active: setActive ?? true,
+        })
+        .eq('id', id);
+      if (benErr) throw benErr;
+
+      // Only touch the primary representative link if the selection
+      // actually changed; never wipe other representatives already linked.
+      const currentPrimaryId = representatives[0]?.id;
+      if (repId && repId !== currentPrimaryId) {
+        await supabase.from('beneficiary_representatives').update({ is_primary: false }).eq('beneficiary_id', id);
+        await supabase
+          .from('beneficiary_representatives')
+          .upsert({ beneficiary_id: id, representative_id: repId, is_primary: true }, { onConflict: 'beneficiary_id,representative_id' });
+      }
+
+      toast.success('Beneficiario actualizado exitosamente.');
+      setShowEditModal(false);
+      await loadAll();
+    } catch (err: any) {
+      toast.error('Error al actualizar beneficiario: ' + err.message);
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  // ─── Representantes vinculados ─────────────────────────────────────────────────
+
+  const handleAddRepresentative = async (repId: string) => {
+    if (!id || !repId) return;
+    setSavingRepLink(true);
+    try {
+      const { error } = await supabase.from('beneficiary_representatives').insert({
+        beneficiary_id: id,
+        representative_id: repId,
+        is_primary: representatives.length === 0,
+      });
+      if (error) throw error;
+      toast.success('Representante vinculado.');
+      setShowLinkRepModal(false);
+      await loadAll();
+    } catch (err: any) {
+      toast.error('Error al vincular representante: ' + err.message);
+    } finally {
+      setSavingRepLink(false);
+    }
+  };
+
+  const handleRemoveRepresentative = async (repId: string) => {
+    if (!id || representatives.length <= 1) return;
+    try {
+      const { error } = await supabase
+        .from('beneficiary_representatives')
+        .delete()
+        .eq('beneficiary_id', id)
+        .eq('representative_id', repId);
+      if (error) throw error;
+      toast.success('Representante desvinculado.');
+      await loadAll();
+    } catch (err: any) {
+      toast.error('Error al desvincular representante: ' + err.message);
     }
   };
 
@@ -532,10 +789,10 @@ export function BeneficiaryDetailPage() {
       representativeEmail: rep?.email || '—',
       beneficiaryName: `${beneficiary.first_name} ${beneficiary.last_name}`,
       sessionDuration: (comData as any)?.session_duration_minutes || 40,
-      photoConsent: beneficiary.photo_consent,
+      photoConsent: beneficiary.photo_consent ?? true,
       therapies: (comData as any)?.selected_therapies || {},
       paymentFrequency: (comData as any)?.payment_frequency || 'session',
-      signedDate: (comData as any)?.signed_at ? new Date((comData as any).signed_at).toLocaleDateString('es-EC') : undefined,
+      signedDate: (comData as any)?.signed_at ? formatDate((comData as any).signed_at) : undefined,
       orgName: currentOrg.name,
       city: currentOrg.city || 'La Troncal',
     });
@@ -546,8 +803,45 @@ export function BeneficiaryDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32 text-slate-400 animate-pulse text-sm">
-        Cargando datos del beneficiario...
+      <div className="space-y-6 max-w-5xl mx-auto">
+        <Skeleton className="h-4 w-40" />
+        <div className="bg-white rounded-3xl p-6 border border-slate-200">
+          <div className="flex items-center gap-6">
+            <SkeletonCircle className="w-24 h-24 shrink-0" />
+            <div className="flex-1 space-y-3">
+              <Skeleton className="h-6 w-1/3" />
+              <Skeleton className="h-3.5 w-1/4" />
+            </div>
+            <div className="hidden sm:flex flex-col gap-2">
+              <Skeleton className="h-9 w-32 rounded-xl" />
+              <Skeleton className="h-9 w-32 rounded-xl" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <div className="flex gap-6 px-6 py-3 border-b border-slate-100">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-4 w-24" />
+            ))}
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <Skeleton className="h-3 w-32" />
+              <div className="rounded-2xl border border-slate-200 p-4 space-y-2">
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-3 w-1/3" />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <Skeleton className="h-3 w-32" />
+              <div className="grid grid-cols-2 gap-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-16 rounded-2xl" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -556,13 +850,13 @@ export function BeneficiaryDetailPage() {
 
   const age = calculateAge(beneficiary.birth_date);
   const initials = getInitials(beneficiary.first_name, beneficiary.last_name);
-  const primaryRep = representatives[0];
   const hasEnrollment = enrollments.length > 0;
 
   const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: 'resumen', label: 'Resumen', icon: Baby },
     { key: 'inscripciones', label: 'Inscripciones', icon: GraduationCap, count: enrollments.length },
     { key: 'progreso', label: 'Progreso de Sesiones', icon: BookOpen, count: sessionNotes.length },
+    { key: 'asistencia', label: 'Asistencia', icon: CalendarCheck, count: attendanceHistory.length },
     { key: 'cobros', label: 'Cobros', icon: DollarSign, count: charges.filter(c => c.status !== 'paid').length },
   ];
 
@@ -584,9 +878,9 @@ export function BeneficiaryDetailPage() {
         <div className="relative flex items-center gap-6">
           {/* Avatar / Photo */}
           <div className="relative flex-shrink-0">
-            {beneficiary.photo_url ? (
+            {photoDisplayUrl ? (
               <img
-                src={beneficiary.photo_url}
+                src={photoDisplayUrl}
                 alt={`${beneficiary.first_name} ${beneficiary.last_name}`}
                 className="w-24 h-24 rounded-2xl object-cover border-4 border-white/30 shadow-xl"
               />
@@ -615,7 +909,7 @@ export function BeneficiaryDetailPage() {
               <span className="flex items-center gap-1 text-white/80 text-sm">
                 <Calendar className="w-3.5 h-3.5" />
                 {age}
-                {beneficiary.birth_date && ` (${new Date(beneficiary.birth_date + 'T00:00:00').toLocaleDateString('es-EC')})`}
+                {beneficiary.birth_date && ` (${formatDate(beneficiary.birth_date)})`}
               </span>
               <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${beneficiary.is_active ? 'bg-emerald-400/30 text-white' : 'bg-white/20 text-white/70'}`}>
                 {beneficiary.is_active ? '● Activo' : '○ Inactivo'}
@@ -636,6 +930,13 @@ export function BeneficiaryDetailPage() {
 
           {/* Actions */}
           <div className="flex flex-col gap-2 ml-auto">
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-sm font-bold transition-colors border border-white/20"
+            >
+              <Edit2 className="w-4 h-4" />
+              Editar
+            </button>
             {hasEnrollment && (
               <button
                 onClick={openActa}
@@ -646,7 +947,7 @@ export function BeneficiaryDetailPage() {
               </button>
             )}
             <button
-              onClick={() => navigate('/app/matricula')}
+              onClick={() => navigate(`/app/matricula?beneficiaryId=${id}`)}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-sm font-bold transition-colors shadow-md"
             >
               <Plus className="w-4 h-4" />
@@ -703,14 +1004,25 @@ export function BeneficiaryDetailPage() {
                 ) : (
                   representatives.map(rep => (
                     <div key={rep.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-sm font-extrabold text-indigo-700">
-                          {getInitials(rep.first_name, rep.last_name)}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-sm font-extrabold text-indigo-700">
+                            {getInitials(rep.first_name, rep.last_name)}
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-900 text-sm">{rep.first_name} {rep.last_name}</p>
+                            <p className="text-xs text-slate-500">{rep.relationship || 'Tutor'}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold text-slate-900 text-sm">{rep.first_name} {rep.last_name}</p>
-                          <p className="text-xs text-slate-500">{rep.relationship || 'Tutor'}</p>
-                        </div>
+                        {representatives.length > 1 && (
+                          <button
+                            onClick={() => handleRemoveRepresentative(rep.id)}
+                            className="text-xs font-semibold text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded-lg transition-colors cursor-pointer shrink-0"
+                            title="Quitar vínculo con este beneficiario"
+                          >
+                            Quitar
+                          </button>
+                        )}
                       </div>
                       {rep.identification && (
                         <p className="text-xs text-slate-600 font-mono flex items-center gap-1.5">
@@ -730,6 +1042,14 @@ export function BeneficiaryDetailPage() {
                     </div>
                   ))
                 )}
+
+                <button
+                  onClick={() => setShowLinkRepModal(true)}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-2.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  Vincular representante
+                </button>
               </div>
 
               {/* Stats card */}
@@ -761,7 +1081,7 @@ export function BeneficiaryDetailPage() {
 
                 <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded-xl p-3 border border-slate-100">
                   <Clock className="w-3.5 h-3.5" />
-                  Registrado el {new Date(beneficiary.created_at).toLocaleDateString('es-EC', { day: '2-digit', month: 'long', year: 'numeric' })}
+                  Registrado el {formatDate(beneficiary.created_at)}
                 </div>
               </div>
             </div>
@@ -776,7 +1096,7 @@ export function BeneficiaryDetailPage() {
                   Historial de Inscripciones
                 </h3>
                 <button
-                  onClick={() => navigate('/app/matricula')}
+                  onClick={() => navigate(`/app/matricula?beneficiaryId=${id}`)}
                   className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition"
                 >
                   <Plus className="w-4 h-4" />
@@ -789,7 +1109,7 @@ export function BeneficiaryDetailPage() {
                   <GraduationCap className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                   <p className="font-semibold text-slate-600">Sin inscripciones formales aún.</p>
                   <p className="text-sm text-slate-400 mt-1">Las inscripciones se crean desde el módulo Nueva Matrícula.</p>
-                  <button onClick={() => navigate('/app/matricula')} className="mt-4 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition">
+                  <button onClick={() => navigate(`/app/matricula?beneficiaryId=${id}`)} className="mt-4 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition">
                     Crear Inscripción
                   </button>
                 </div>
@@ -802,16 +1122,25 @@ export function BeneficiaryDetailPage() {
                           {statusLabel(enr.status)}
                         </span>
                         <span className="text-sm font-bold text-slate-900">
-                          Inscripción desde {new Date(enr.start_date + 'T00:00:00').toLocaleDateString('es-EC')}
+                          Inscripción desde {formatDate(enr.start_date)}
                         </span>
                       </div>
-                      {enr.status === 'active' && (
-                        <button onClick={openActa}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 transition">
-                          <FileText className="w-3.5 h-3.5" />
-                          Ver Acta
-                        </button>
-                      )}
+                      <div className="flex items-center gap-3">
+                        {canEmitInvoices && (
+                          <button onClick={() => setInvoicingEnrollmentId(enr.id)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 transition">
+                            <DollarSign className="w-3.5 h-3.5" />
+                            Facturar Inscripción
+                          </button>
+                        )}
+                        {enr.status === 'active' && (
+                          <button onClick={openActa}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 transition">
+                            <FileText className="w-3.5 h-3.5" />
+                            Ver Acta
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {enr.services.length > 0 ? (
                       <table className="w-full text-sm">
@@ -911,7 +1240,7 @@ export function BeneficiaryDetailPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
                             <span className="text-sm font-bold text-slate-900">
-                              {new Date(note.session_date + 'T00:00:00').toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' })}
+                              {formatDateWithWeekday(note.session_date)}
                             </span>
                             {note.therapist_name && (
                               <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full font-semibold">
@@ -957,6 +1286,42 @@ export function BeneficiaryDetailPage() {
             </div>
           )}
 
+          {/* ─── TAB: Asistencia ──────────────────────────────────────────── */}
+          {activeTab === 'asistencia' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                  <CalendarCheck className="w-5 h-5 text-indigo-500" />
+                  Historial de Asistencia
+                </h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Registro completo de sesiones de {beneficiary.first_name} — quién marcó cada asistencia y cuándo.
+                  Útil para verificar un día puntual ante una consulta del representante.
+                </p>
+              </div>
+
+              {attendanceHistory.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {([
+                    { status: 'present', label: 'Presentes', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                    { status: 'late', label: 'Tarde', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+                    { status: 'absent', label: 'Ausentes', cls: 'bg-red-50 text-red-700 border-red-200' },
+                    { status: 'justified', label: 'Justificados', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+                  ] as const).map(({ status, label, cls }) => (
+                    <div key={status} className={`rounded-xl border px-3 py-2 ${cls}`}>
+                      <p className="text-lg font-bold leading-none">
+                        {attendanceHistory.filter(a => a.status === status).length}
+                      </p>
+                      <p className="text-xs mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <AttendanceHistoryTable rows={attendanceHistory} showBeneficiary={false} />
+            </div>
+          )}
+
           {/* ─── TAB: Cobros ──────────────────────────────────────────────── */}
           {activeTab === 'cobros' && (
             <div className="space-y-4">
@@ -994,7 +1359,7 @@ export function BeneficiaryDetailPage() {
                               <span className="truncate block">{charge.description}</span>
                               {charge.due_date && (
                                 <span className="text-[11px] text-slate-400 font-normal">
-                                  Vence: {new Date(charge.due_date + 'T00:00:00').toLocaleDateString('es-EC')}
+                                  Vence: {formatDate(charge.due_date)}
                                 </span>
                               )}
                             </td>
@@ -1016,14 +1381,22 @@ export function BeneficiaryDetailPage() {
                               </span>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              {charge.status !== 'paid' && (
+                              <div className="flex items-center justify-center gap-1.5">
                                 <button
-                                  onClick={() => setPaymentTarget(charge)}
-                                  className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition"
+                                  onClick={() => setViewingCharge(charge)}
+                                  className="px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition"
                                 >
-                                  Registrar Abono
+                                  Ver historial
                                 </button>
-                              )}
+                                {charge.status !== 'paid' && (
+                                  <button
+                                    onClick={() => setPaymentTarget(charge)}
+                                    className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition"
+                                  >
+                                    Registrar Abono
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1048,12 +1421,38 @@ export function BeneficiaryDetailPage() {
         />
       )}
 
-      {paymentTarget && currentOrg && (
-        <PaymentModal
+      {paymentTarget && (
+        <RegisterPaymentModal
           charge={paymentTarget}
-          organizationId={currentOrg.id}
+          paidSoFar={paymentTarget.paid_amount || 0}
           onClose={() => setPaymentTarget(null)}
           onSuccess={loadAll}
+          hasElectronicBilling={canEmitInvoices}
+          beneficiaryId={beneficiary?.id}
+        />
+      )}
+
+      {invoicingEnrollmentId && currentOrg && beneficiary && (
+        <InvoiceEnrollmentModal
+          enrollmentId={invoicingEnrollmentId}
+          organizationId={currentOrg.id}
+          beneficiaryId={beneficiary.id}
+          beneficiaryName={`${beneficiary.first_name} ${beneficiary.last_name}`}
+          onClose={() => setInvoicingEnrollmentId(null)}
+          onSuccess={loadAll}
+        />
+      )}
+
+      {currentOrg && beneficiary && (
+        <PaymentDetailModal
+          isOpen={!!viewingCharge}
+          onClose={() => setViewingCharge(null)}
+          charge={viewingCharge}
+          payments={viewingCharge?.payments || []}
+          onPayRemaining={(c) => setPaymentTarget(c)}
+          organization={currentOrg}
+          beneficiaryId={beneficiary.id}
+          beneficiaryName={`${beneficiary.first_name} ${beneficiary.last_name}`}
         />
       )}
 
@@ -1062,6 +1461,44 @@ export function BeneficiaryDetailPage() {
           isOpen={isActaOpen}
           onClose={() => { setIsActaOpen(false); setActaData(null); }}
           data={actaData}
+        />
+      )}
+
+      {showEditModal && (
+        <BeneficiaryModal
+          mode="edit"
+          initial={{
+            first_name: beneficiary.first_name,
+            last_name: beneficiary.last_name,
+            birth_date: beneficiary.birth_date || '',
+            consultation_reason: beneficiary.consultation_reason || '',
+            photo_consent: beneficiary.photo_consent ?? true,
+            notes: beneficiary.notes || '',
+            rep_mode: 'existing',
+            selected_rep_id: representatives[0]?.id || '',
+            rep_cedula: representatives[0]?.identification || '',
+            rep_first_name: representatives[0]?.first_name || '',
+            rep_last_name: representatives[0]?.last_name || '',
+            rep_phone: representatives[0]?.phone || '',
+            rep_email: representatives[0]?.email || '',
+            rep_relationship: representatives[0]?.relationship || 'Madre',
+          }}
+          isActive={beneficiary.is_active}
+          submitting={editSubmitting}
+          existingReps={orgRepresentatives}
+          onClose={() => setShowEditModal(false)}
+          onSubmit={handleEditSubmit}
+        />
+      )}
+
+      {showLinkRepModal && currentOrg && (
+        <LinkRepresentativeModal
+          organizationId={currentOrg.id}
+          candidates={orgRepresentatives.filter(r => !representatives.some(rr => rr.id === r.id))}
+          saving={savingRepLink}
+          onClose={() => setShowLinkRepModal(false)}
+          onSelectExisting={handleAddRepresentative}
+          onCreated={handleAddRepresentative}
         />
       )}
     </div>

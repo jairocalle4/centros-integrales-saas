@@ -11,8 +11,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CentrosIntegrales.Billing.Application\CentrosIntegrales.Billing.Application.csproj" />
     <ProjectReference Include="..\CentrosIntegrales.Billing.Infrastructure\CentrosIntegrales.Billing.Infrastructure.csproj" />
+    <ProjectReference Include="..\CentrosIntegrales.Billing.Domain\CentrosIntegrales.Billing.Domain.csproj" />
   </ItemGroup>
 
 </Project>

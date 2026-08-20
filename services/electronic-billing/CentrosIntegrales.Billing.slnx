@@ -1,7 +1,6 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/CentrosIntegrales.Billing.Api/CentrosIntegrales.Billing.Api.csproj" />
-    <Project Path="src/CentrosIntegrales.Billing.Application/CentrosIntegrales.Billing.Application.csproj" />
     <Project Path="src/CentrosIntegrales.Billing.Domain/CentrosIntegrales.Billing.Domain.csproj" />
     <Project Path="src/CentrosIntegrales.Billing.Infrastructure/CentrosIntegrales.Billing.Infrastructure.csproj" />
   </Folder>

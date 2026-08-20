@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\CentrosIntegrales.Billing.Application\CentrosIntegrales.Billing.Application.csproj" />
     <ProjectReference Include="..\CentrosIntegrales.Billing.Domain\CentrosIntegrales.Billing.Domain.csproj" />
   </ItemGroup>
 
@@ -10,5 +9,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QuestPDF" Version="2025.4.0" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+  </ItemGroup>
 
 </Project>

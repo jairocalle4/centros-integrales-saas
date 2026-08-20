@@ -39,198 +39,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      attendance: {
-        Row: {
-          beneficiary_id: string
-          created_at: string
-          id: string
-          notes: string | null
-          organization_id: string
-          recorded_by: string | null
-          session_date: string
-          status: string
-        }
-        Insert: {
-          beneficiary_id: string
-          created_at?: string
-          id?: string
-          notes?: string | null
-          organization_id: string
-          recorded_by?: string | null
-          session_date?: string
-          status?: string
-        }
-        Update: {
-          beneficiary_id?: string
-          created_at?: string
-          id?: string
-          notes?: string | null
-          organization_id?: string
-          recorded_by?: string | null
-          session_date?: string
-          status?: string
-        }
-        Relationships: []
-      }
-      audit_logs: {
-        Row: {
-          action: string
-          created_at: string
-          entity: string
-          entity_id: string
-          id: string
-          organization_id: string
-          user_id: string | null
-        }
-        Insert: {
-          action: string
-          created_at?: string
-          entity: string
-          entity_id: string
-          id?: string
-          organization_id: string
-          user_id?: string | null
-        }
-        Update: {
-          action?: string
-          created_at?: string
-          entity?: string
-          entity_id?: string
-          id?: string
-          organization_id?: string
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "audit_logs_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "audit_logs_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      beneficiaries: {
-        Row: {
-          birth_date: string | null
-          created_at: string
-          first_name: string
-          id: string
-          is_active: boolean
-          last_name: string
-          notes: string | null
-          organization_id: string
-          photo_url: string | null
-          consultation_reason: string | null
-          photo_consent: boolean
-          updated_at: string
-        }
-        Insert: {
-          birth_date?: string | null
-          created_at?: string
-          first_name: string
-          id?: string
-          is_active?: boolean
-          last_name: string
-          notes?: string | null
-          organization_id: string
-          photo_url?: string | null
-          consultation_reason?: string | null
-          photo_consent?: boolean
-          updated_at?: string
-        }
-        Update: {
-          birth_date?: string | null
-          created_at?: string
-          first_name?: string
-          id?: string
-          is_active?: boolean
-          last_name?: string
-          notes?: string | null
-          organization_id?: string
-          photo_url?: string | null
-          consultation_reason?: string | null
-          photo_consent?: boolean
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      beneficiary_representatives: {
-        Row: {
-          beneficiary_id: string
-          created_at: string
-          is_primary: boolean
-          representative_id: string
-        }
-        Insert: {
-          beneficiary_id: string
-          created_at?: string
-          is_primary?: boolean
-          representative_id: string
-        }
-        Update: {
-          beneficiary_id?: string
-          created_at?: string
-          is_primary?: boolean
-          representative_id?: string
-        }
-        Relationships: []
-      }
-      commitments: {
-        Row: {
-          beneficiary_id: string
-          created_at: string
-          id: string
-          max_justified_absences: number
-          organization_id: string
-          payment_frequency: string
-          photo_consent: boolean
-          representative_id: string | null
-          selected_therapies: Json
-          session_duration_minutes: number
-          signed_at: string | null
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          beneficiary_id: string
-          created_at?: string
-          id?: string
-          max_justified_absences?: number
-          organization_id: string
-          payment_frequency?: string
-          photo_consent?: boolean
-          representative_id?: string | null
-          selected_therapies?: Json
-          session_duration_minutes?: number
-          signed_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          beneficiary_id?: string
-          created_at?: string
-          id?: string
-          max_justified_absences?: number
-          organization_id?: string
-          payment_frequency?: string
-          photo_consent?: boolean
-          representative_id?: string | null
-          selected_therapies?: Json
-          session_duration_minutes?: number
-          signed_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       appointments: {
         Row: {
           appointment_date: string
@@ -289,7 +97,236 @@ export type Database = {
           time_slot?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "appointments_converted_beneficiary_id_fkey"
+            columns: ["converted_beneficiary_id"]
+            isOneToOne: false
+            referencedRelation: "beneficiaries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      attendance: {
+        Row: {
+          actual_arrival_time: string | null
+          beneficiary_id: string
+          created_at: string
+          enrollment_schedule_id: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          recorded_by: string | null
+          representative_signature: boolean | null
+          scheduled_time: string | null
+          service_id: string | null
+          session_date: string
+          status: string
+          therapy_type: string | null
+        }
+        Insert: {
+          actual_arrival_time?: string | null
+          beneficiary_id: string
+          created_at?: string
+          enrollment_schedule_id?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          recorded_by?: string | null
+          representative_signature?: boolean | null
+          scheduled_time?: string | null
+          service_id?: string | null
+          session_date?: string
+          status?: string
+          therapy_type?: string | null
+        }
+        Update: {
+          actual_arrival_time?: string | null
+          beneficiary_id?: string
+          created_at?: string
+          enrollment_schedule_id?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          recorded_by?: string | null
+          representative_signature?: boolean | null
+          scheduled_time?: string | null
+          service_id?: string | null
+          session_date?: string
+          status?: string
+          therapy_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_beneficiary_id_fkey"
+            columns: ["beneficiary_id"]
+            isOneToOne: false
+            referencedRelation: "beneficiaries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_enrollment_schedule_id_fkey"
+            columns: ["enrollment_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "enrollment_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      audit_logs: {
+        Row: {
+          action: string
+          created_at: string
+          entity: string
+          entity_id: string
+          id: string
+          organization_id: string
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          entity: string
+          entity_id: string
+          id?: string
+          organization_id: string
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          entity?: string
+          entity_id?: string
+          id?: string
+          organization_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_logs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "audit_logs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      beneficiaries: {
+        Row: {
+          birth_date: string | null
+          consultation_reason: string | null
+          created_at: string
+          first_name: string
+          id: string
+          is_active: boolean
+          last_name: string
+          notes: string | null
+          organization_id: string
+          photo_consent: boolean | null
+          photo_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          birth_date?: string | null
+          consultation_reason?: string | null
+          created_at?: string
+          first_name: string
+          id?: string
+          is_active?: boolean
+          last_name: string
+          notes?: string | null
+          organization_id: string
+          photo_consent?: boolean | null
+          photo_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          birth_date?: string | null
+          consultation_reason?: string | null
+          created_at?: string
+          first_name?: string
+          id?: string
+          is_active?: boolean
+          last_name?: string
+          notes?: string | null
+          organization_id?: string
+          photo_consent?: boolean | null
+          photo_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "beneficiaries_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      beneficiary_representatives: {
+        Row: {
+          beneficiary_id: string
+          created_at: string
+          is_primary: boolean
+          representative_id: string
+        }
+        Insert: {
+          beneficiary_id: string
+          created_at?: string
+          is_primary?: boolean
+          representative_id: string
+        }
+        Update: {
+          beneficiary_id?: string
+          created_at?: string
+          is_primary?: boolean
+          representative_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "beneficiary_representatives_beneficiary_id_fkey"
+            columns: ["beneficiary_id"]
+            isOneToOne: false
+            referencedRelation: "beneficiaries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "beneficiary_representatives_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       charges: {
         Row: {
@@ -298,6 +335,7 @@ export type Database = {
           created_at: string
           description: string
           due_date: string | null
+          enrollment_id: string | null
           id: string
           notes: string | null
           organization_id: string
@@ -312,6 +350,7 @@ export type Database = {
           created_at?: string
           description: string
           due_date?: string | null
+          enrollment_id?: string | null
           id?: string
           notes?: string | null
           organization_id: string
@@ -326,6 +365,7 @@ export type Database = {
           created_at?: string
           description?: string
           due_date?: string | null
+          enrollment_id?: string | null
           id?: string
           notes?: string | null
           organization_id?: string
@@ -334,7 +374,268 @@ export type Database = {
           status?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "charges_beneficiary_id_fkey"
+            columns: ["beneficiary_id"]
+            isOneToOne: false
+            referencedRelation: "beneficiaries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "charges_enrollment_id_fkey"
+            columns: ["enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "enrollments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "charges_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "charges_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      commitments: {
+        Row: {
+          beneficiary_id: string
+          created_at: string
+          id: string
+          max_justified_absences: number
+          organization_id: string
+          payment_frequency: string
+          photo_consent: boolean
+          representative_id: string | null
+          selected_therapies: Json
+          session_duration_minutes: number
+          signed_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          beneficiary_id: string
+          created_at?: string
+          id?: string
+          max_justified_absences?: number
+          organization_id: string
+          payment_frequency?: string
+          photo_consent?: boolean
+          representative_id?: string | null
+          selected_therapies?: Json
+          session_duration_minutes?: number
+          signed_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          beneficiary_id?: string
+          created_at?: string
+          id?: string
+          max_justified_absences?: number
+          organization_id?: string
+          payment_frequency?: string
+          photo_consent?: boolean
+          representative_id?: string | null
+          selected_therapies?: Json
+          session_duration_minutes?: number
+          signed_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commitments_beneficiary_id_fkey"
+            columns: ["beneficiary_id"]
+            isOneToOne: false
+            referencedRelation: "beneficiaries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commitments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commitments_representative_id_fkey"
+            columns: ["representative_id"]
+            isOneToOne: false
+            referencedRelation: "representatives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      enrollment_schedules: {
+        Row: {
+          created_at: string
+          day_of_week: number
+          end_time: string
+          enrollment_service_id: string
+          id: string
+          is_active: boolean
+          organization_id: string
+          start_time: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          day_of_week: number
+          end_time: string
+          enrollment_service_id: string
+          id?: string
+          is_active?: boolean
+          organization_id: string
+          start_time: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          day_of_week?: number
+          end_time?: string
+          enrollment_service_id?: string
+          id?: string
+          is_active?: boolean
+          organization_id?: string
+          start_time?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enrollment_schedules_enrollment_service_id_fkey"
+            columns: ["enrollment_service_id"]
+            isOneToOne: false
+            referencedRelation: "enrollment_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "enrollment_schedules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      enrollment_services: {
+        Row: {
+          created_at: string
+          enrollment_id: string
+          id: string
+          notes: string | null
+          service_id: string
+          session_duration_min: number
+          sessions_completed: number
+          sessions_per_week: number
+          status: string
+          total_sessions: number | null
+          unit_price: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          enrollment_id: string
+          id?: string
+          notes?: string | null
+          service_id: string
+          session_duration_min?: number
+          sessions_completed?: number
+          sessions_per_week?: number
+          status?: string
+          total_sessions?: number | null
+          unit_price?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          enrollment_id?: string
+          id?: string
+          notes?: string | null
+          service_id?: string
+          session_duration_min?: number
+          sessions_completed?: number
+          sessions_per_week?: number
+          status?: string
+          total_sessions?: number | null
+          unit_price?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enrollment_services_enrollment_id_fkey"
+            columns: ["enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "enrollments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "enrollment_services_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      enrollments: {
+        Row: {
+          beneficiary_id: string
+          created_at: string
+          end_date: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          start_date: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          beneficiary_id: string
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          start_date?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          beneficiary_id?: string
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          start_date?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enrollments_beneficiary_id_fkey"
+            columns: ["beneficiary_id"]
+            isOneToOne: false
+            referencedRelation: "beneficiaries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "enrollments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       internal_payments: {
         Row: {
@@ -348,6 +649,7 @@ export type Database = {
           organization_id: string
           payment_date: string
           reference: string | null
+          sri_document_id: string | null
         }
         Insert: {
           amount: number
@@ -360,6 +662,7 @@ export type Database = {
           organization_id: string
           payment_date?: string
           reference?: string | null
+          sri_document_id?: string | null
         }
         Update: {
           amount?: number
@@ -372,8 +675,31 @@ export type Database = {
           organization_id?: string
           payment_date?: string
           reference?: string | null
+          sri_document_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "internal_payments_charge_id_fkey"
+            columns: ["charge_id"]
+            isOneToOne: false
+            referencedRelation: "charges"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "internal_payments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "internal_payments_sri_document_id_fkey"
+            columns: ["sri_document_id"]
+            isOneToOne: false
+            referencedRelation: "sri_documents"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       invitations: {
         Row: {
@@ -565,6 +891,24 @@ export type Database = {
         }
         Relationships: []
       }
+      platform_settings: {
+        Row: {
+          id: boolean
+          iva_percentage: number
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          iva_percentage?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: boolean
+          iva_percentage?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -632,7 +976,15 @@ export type Database = {
           relationship?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "representatives_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       services: {
         Row: {
@@ -665,7 +1017,245 @@ export type Database = {
           price?: number
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "services_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      session_notes: {
+        Row: {
+          attendance_id: string | null
+          beneficiary_id: string
+          created_at: string
+          created_by: string | null
+          enrollment_service_id: string | null
+          goals_achieved: string | null
+          id: string
+          next_steps: string | null
+          observations: string | null
+          organization_id: string
+          rating: number | null
+          session_date: string
+          therapist_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          attendance_id?: string | null
+          beneficiary_id: string
+          created_at?: string
+          created_by?: string | null
+          enrollment_service_id?: string | null
+          goals_achieved?: string | null
+          id?: string
+          next_steps?: string | null
+          observations?: string | null
+          organization_id: string
+          rating?: number | null
+          session_date?: string
+          therapist_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attendance_id?: string | null
+          beneficiary_id?: string
+          created_at?: string
+          created_by?: string | null
+          enrollment_service_id?: string | null
+          goals_achieved?: string | null
+          id?: string
+          next_steps?: string | null
+          observations?: string | null
+          organization_id?: string
+          rating?: number | null
+          session_date?: string
+          therapist_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_notes_attendance_id_fkey"
+            columns: ["attendance_id"]
+            isOneToOne: false
+            referencedRelation: "attendance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_notes_beneficiary_id_fkey"
+            columns: ["beneficiary_id"]
+            isOneToOne: false
+            referencedRelation: "beneficiaries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_notes_enrollment_service_id_fkey"
+            columns: ["enrollment_service_id"]
+            isOneToOne: false
+            referencedRelation: "enrollment_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sri_configurations: {
+        Row: {
+          cert_password_encrypted: string | null
+          cert_storage_path: string | null
+          cert_uploaded_at: string | null
+          created_at: string
+          environment: string
+          establecimiento: string
+          id: string
+          organization_id: string
+          punto_emision: string
+          sri_api_emisor_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          cert_password_encrypted?: string | null
+          cert_storage_path?: string | null
+          cert_uploaded_at?: string | null
+          created_at?: string
+          environment: string
+          establecimiento?: string
+          id?: string
+          organization_id: string
+          punto_emision?: string
+          sri_api_emisor_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cert_password_encrypted?: string | null
+          cert_storage_path?: string | null
+          cert_uploaded_at?: string | null
+          created_at?: string
+          environment?: string
+          establecimiento?: string
+          id?: string
+          organization_id?: string
+          punto_emision?: string
+          sri_api_emisor_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sri_configurations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sri_documents: {
+        Row: {
+          authorization_date: string | null
+          authorization_number: string | null
+          clave_acceso: string | null
+          cliente_identificacion: string
+          created_at: string
+          document_type: string
+          fecha_emision: string
+          id: string
+          organization_id: string
+          pdf_url: string | null
+          secuencial: string
+          status: string
+          total: number
+          updated_at: string
+          xml_url: string | null
+        }
+        Insert: {
+          authorization_date?: string | null
+          authorization_number?: string | null
+          clave_acceso?: string | null
+          cliente_identificacion: string
+          created_at?: string
+          document_type?: string
+          fecha_emision?: string
+          id?: string
+          organization_id: string
+          pdf_url?: string | null
+          secuencial: string
+          status?: string
+          total?: number
+          updated_at?: string
+          xml_url?: string | null
+        }
+        Update: {
+          authorization_date?: string | null
+          authorization_number?: string | null
+          clave_acceso?: string | null
+          cliente_identificacion?: string
+          created_at?: string
+          document_type?: string
+          fecha_emision?: string
+          id?: string
+          organization_id?: string
+          pdf_url?: string | null
+          secuencial?: string
+          status?: string
+          total?: number
+          updated_at?: string
+          xml_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sri_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sri_emission_sequences: {
+        Row: {
+          document_type: string
+          establecimiento: string
+          id: string
+          last_sequence: number
+          organization_id: string
+          punto_emision: string
+          updated_at: string
+        }
+        Insert: {
+          document_type?: string
+          establecimiento: string
+          id?: string
+          last_sequence?: number
+          organization_id: string
+          punto_emision: string
+          updated_at?: string
+        }
+        Update: {
+          document_type?: string
+          establecimiento?: string
+          id?: string
+          last_sequence?: number
+          organization_id?: string
+          punto_emision?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sri_emission_sequences_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       subscription_plans: {
         Row: {
@@ -735,7 +1325,7 @@ export type Database = {
           {
             foreignKeyName: "subscriptions_organization_id_fkey"
             columns: ["organization_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -799,20 +1389,8 @@ export type Database = {
       }
       is_organization_active: { Args: { p_org_id: string }; Returns: boolean }
       is_platform_admin: { Args: { p_user_id?: string }; Returns: boolean }
-      register_payment: {
-        Args: {
-          p_organization_id: string
-          p_amount: number
-          p_cycle: string
-          p_reference?: string
-        }
-        Returns: string
-      }
       superadmin_assign_plan: {
-        Args: {
-          p_org_id: string
-          p_plan_id: string
-        }
+        Args: { p_org_id: string; p_plan_id: string }
         Returns: undefined
       }
       superadmin_create_organization: {

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: centros-integrales-ride
+    env: docker
+    plan: free
+    region: ohio
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: RIDE_SERVICE_API_KEY
+        sync: false

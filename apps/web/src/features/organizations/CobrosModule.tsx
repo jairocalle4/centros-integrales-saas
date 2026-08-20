@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 
 import { ServiciosList } from './ServiciosList';
-import { PaymentDetailModal, type Payment } from './PaymentDetailModal';
+import { PaymentDetailModal, RegisterPaymentModal, type Payment } from './PaymentDetailModal';
+import { SkeletonTable } from '../../components/ui/Skeleton';
 
 type Charge = {
   id: string;
@@ -41,7 +42,8 @@ type Beneficiary = {
 };
 
 export function CobrosModule() {
-  const { currentOrg } = useOrg();
+  const { currentOrg, hasElectronicBilling, hasSriCertificate } = useOrg();
+  const canEmitInvoices = hasElectronicBilling && hasSriCertificate;
   const [charges, setCharges] = useState<Charge[]>([]);
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,15 +60,14 @@ export function CobrosModule() {
   const [periodLabel, setPeriodLabel] = useState('');
   const [chargeNotes, setChargeNotes] = useState('');
   const [isSubmittingCharge, setIsSubmittingCharge] = useState(false);
+  // Optional: register a payment against this same charge right away
+  const [registerPaymentNow, setRegisterPaymentNow] = useState(false);
+  const [initialPaymentAmount, setInitialPaymentAmount] = useState<number | ''>('');
+  const [initialPaymentMethod, setInitialPaymentMethod] = useState('cash');
+  const [initialPaymentDate, setInitialPaymentDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Modal Registrar Pago
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [payingCharge, setPayingCharge] = useState<Charge | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState<number | ''>('');
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [paymentReference, setPaymentReference] = useState('');
-  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
   // Modal Servicio
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
@@ -138,22 +139,42 @@ export function CobrosModule() {
   const handleCreateCharge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOrg || !chargeDescription.trim() || !chargeAmount) return;
+    if (registerPaymentNow && (!initialPaymentAmount || !initialPaymentDate)) {
+      toast.error('Ingresa el monto y la fecha del pago, o desmarca "Registrar pago ahora".');
+      return;
+    }
 
     setIsSubmittingCharge(true);
     try {
-      const { error } = await supabase.from('charges').insert({
-        organization_id: currentOrg.id,
-        beneficiary_id: selectedBenId || null,
-        description: chargeDescription.trim(),
-        amount: Number(chargeAmount),
-        due_date: chargeDueDate || null,
-        period_label: periodLabel.trim() || null,
-        notes: chargeNotes.trim() || null,
-        status: 'pending',
-      });
-
+      const { data: newCharge, error } = await supabase
+        .from('charges')
+        .insert({
+          organization_id: currentOrg.id,
+          beneficiary_id: selectedBenId || null,
+          description: chargeDescription.trim(),
+          amount: Number(chargeAmount),
+          due_date: chargeDueDate || null,
+          period_label: periodLabel.trim() || null,
+          notes: chargeNotes.trim() || null,
+          status: 'pending',
+        })
+        .select('id')
+        .single();
       if (error) throw error;
-      toast.success('Cargo creado exitosamente.');
+
+      if (registerPaymentNow && newCharge && initialPaymentAmount) {
+        const { error: payErr } = await supabase.from('internal_payments').insert({
+          organization_id: currentOrg.id,
+          charge_id: newCharge.id,
+          amount: Math.min(Number(initialPaymentAmount), Number(chargeAmount)),
+          payment_date: initialPaymentDate,
+          method: initialPaymentMethod,
+          reference: null,
+        });
+        if (payErr) throw payErr;
+      }
+
+      toast.success(registerPaymentNow ? 'Cargo y pago registrados exitosamente.' : 'Cargo creado exitosamente.');
       setIsChargeModalOpen(false);
       resetChargeForm();
       loadData();
@@ -161,33 +182,6 @@ export function CobrosModule() {
       toast.error('Error creando cargo: ' + err.message);
     } finally {
       setIsSubmittingCharge(false);
-    }
-  };
-
-  const handleRegisterPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentOrg || !payingCharge || !paymentAmount) return;
-
-    setIsSubmittingPayment(true);
-    try {
-      const { error } = await supabase.from('internal_payments').insert({
-        organization_id: currentOrg.id,
-        charge_id: payingCharge.id,
-        amount: Number(paymentAmount),
-        payment_date: paymentDate,
-        method: paymentMethod,
-        reference: paymentReference.trim() || null,
-      });
-
-      if (error) throw error;
-      toast.success('Pago registrado correctamente.');
-      setIsPaymentModalOpen(false);
-      setPayingCharge(null);
-      loadData();
-    } catch (err: any) {
-      toast.error('Error registrando pago: ' + err.message);
-    } finally {
-      setIsSubmittingPayment(false);
     }
   };
 
@@ -213,17 +207,14 @@ export function CobrosModule() {
     setChargeDueDate('');
     setPeriodLabel('');
     setChargeNotes('');
+    setRegisterPaymentNow(false);
+    setInitialPaymentAmount('');
+    setInitialPaymentMethod('cash');
+    setInitialPaymentDate(new Date().toISOString().split('T')[0]);
   };
 
   const openPaymentModal = (charge: Charge) => {
     setPayingCharge(charge);
-    const paidSoFar = paymentsMap[charge.id] || 0;
-    const remaining = Math.max(0, charge.amount - paidSoFar);
-    setPaymentAmount(remaining);
-    setPaymentMethod('cash');
-    setPaymentDate(new Date().toISOString().split('T')[0]);
-    setPaymentReference('');
-    setIsPaymentModalOpen(true);
   };
 
   const filteredCharges = charges.filter((c) => {
@@ -382,7 +373,7 @@ export function CobrosModule() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 animate-pulse">Cargando cobros...</div>
+          <SkeletonTable rows={6} columns={6} />
         ) : filteredCharges.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
             <Receipt className="w-12 h-12 text-slate-300 mx-auto mb-3" />
@@ -429,6 +420,13 @@ export function CobrosModule() {
                       <td className="px-6 py-4">{statusBadge(charge.status)}</td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setSelectedChargeDetails(charge)}
+                            className="text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors"
+                            title="Ver detalle e historial de pagos"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
                           {(charge.status === 'pending' || charge.status === 'partial') && (
                             <button
                               onClick={() => openPaymentModal(charge)}
@@ -540,6 +538,54 @@ export function CobrosModule() {
                 />
               </div>
 
+              <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={registerPaymentNow}
+                    onChange={(e) => setRegisterPaymentNow(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  Ya recibí un pago por este cargo — registrarlo ahora
+                </label>
+                {registerPaymentNow && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Monto *</label>
+                      <input
+                        type="number" step="0.01" min="0.01" max={chargeAmount || undefined}
+                        value={initialPaymentAmount}
+                        onChange={(e) => setInitialPaymentAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Método</label>
+                      <select
+                        value={initialPaymentMethod}
+                        onChange={(e) => setInitialPaymentMethod(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="cash">Efectivo</option>
+                        <option value="transfer">Transferencia</option>
+                        <option value="card">Tarjeta</option>
+                        <option value="other">Otro</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Fecha *</label>
+                      <input
+                        type="date"
+                        value={initialPaymentDate}
+                        onChange={(e) => setInitialPaymentDate(e.target.value)}
+                        max={new Date().toISOString().split('T')[0]}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button
                   type="button"
@@ -562,106 +608,34 @@ export function CobrosModule() {
       )}
 
       {/* Modal Registrar Pago */}
-      {isPaymentModalOpen && payingCharge && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
-              <h3 className="text-lg font-bold text-slate-900">Registrar Pago Interno</h3>
-              <button onClick={() => setIsPaymentModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
-              <p className="text-xs text-slate-500 font-semibold uppercase">Concepto</p>
-              <p className="text-sm font-bold text-slate-900">{payingCharge.description}</p>
-              <div className="flex justify-between mt-2 text-xs">
-                <span className="text-slate-500">Monto total: ${payingCharge.amount.toFixed(2)}</span>
-                <span className="text-amber-700 font-semibold">
-                  Pendiente: ${(payingCharge.amount - (paymentsMap[payingCharge.id] || 0)).toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            <form onSubmit={handleRegisterPayment} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Monto a Pagar (USD) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  max={payingCharge.amount - (paymentsMap[payingCharge.id] || 0)}
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(Number(e.target.value))}
-                  required
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Método de Pago</label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="cash">Efectivo</option>
-                    <option value="transfer">Transferencia</option>
-                    <option value="card">Tarjeta</option>
-                    <option value="other">Otro</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Fecha de Pago</label>
-                  <input
-                    type="date"
-                    value={paymentDate}
-                    onChange={(e) => setPaymentDate(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Referencia / Comprobante</label>
-                <input
-                  type="text"
-                  value={paymentReference}
-                  onChange={(e) => setPaymentReference(e.target.value)}
-                  placeholder="Ej. Transf #12345"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsPaymentModalOpen(false)}
-                  className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingPayment}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
-                >
-                  {isSubmittingPayment ? 'Registrando...' : 'Confirmar Pago'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {payingCharge && (
+        <RegisterPaymentModal
+          charge={payingCharge}
+          paidSoFar={paymentsMap[payingCharge.id] || 0}
+          onClose={() => setPayingCharge(null)}
+          onSuccess={loadData}
+          hasElectronicBilling={canEmitInvoices}
+          beneficiaryId={payingCharge.beneficiary_id || undefined}
+        />
       )}
 
       {/* PAYMENT DETAIL MODAL */}
-      <PaymentDetailModal
-        isOpen={!!selectedChargeDetails}
-        onClose={() => setSelectedChargeDetails(null)}
-        charge={selectedChargeDetails}
-        payments={selectedChargeDetails ? internalPayments.filter(p => p.charge_id === selectedChargeDetails.id) : []}
-        onPayRemaining={openPaymentModal}
-      />
+      {currentOrg && (
+        <PaymentDetailModal
+          isOpen={!!selectedChargeDetails}
+          onClose={() => setSelectedChargeDetails(null)}
+          charge={selectedChargeDetails}
+          payments={selectedChargeDetails ? internalPayments.filter(p => p.charge_id === selectedChargeDetails.id) : []}
+          onPayRemaining={openPaymentModal}
+          organization={currentOrg}
+          beneficiaryId={selectedChargeDetails?.beneficiary_id || ''}
+          beneficiaryName={
+            selectedChargeDetails?.beneficiaries
+              ? `${selectedChargeDetails.beneficiaries.first_name} ${selectedChargeDetails.beneficiaries.last_name}`
+              : 'Cobro general'
+          }
+        />
+      )}
     </div>
   );
 }

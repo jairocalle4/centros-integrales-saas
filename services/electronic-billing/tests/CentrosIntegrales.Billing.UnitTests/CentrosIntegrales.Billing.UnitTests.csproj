@@ -19,7 +19,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\CentrosIntegrales.Billing.Application\CentrosIntegrales.Billing.Application.csproj" />
     <ProjectReference Include="..\..\src\CentrosIntegrales.Billing.Domain\CentrosIntegrales.Billing.Domain.csproj" />
     <ProjectReference Include="..\..\src\CentrosIntegrales.Billing.Infrastructure\CentrosIntegrales.Billing.Infrastructure.csproj" />
   </ItemGroup>
