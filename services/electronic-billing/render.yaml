@@ -4,8 +4,9 @@ services:
     env: docker
     plan: free
     region: ohio
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    rootDir: services/electronic-billing
+    dockerfilePath: services/electronic-billing/Dockerfile
+    dockerContext: services/electronic-billing
     healthCheckPath: /health
     envVars:
       - key: RIDE_SERVICE_API_KEY
