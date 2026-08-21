@@ -5,8 +5,8 @@ services:
     plan: free
     region: ohio
     rootDir: services/electronic-billing
-    dockerfilePath: services/electronic-billing/Dockerfile
-    dockerContext: services/electronic-billing
+    dockerfilePath: Dockerfile
+    dockerContext: .
     healthCheckPath: /health
     envVars:
       - key: RIDE_SERVICE_API_KEY
