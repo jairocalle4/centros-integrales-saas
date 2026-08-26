@@ -19,6 +19,19 @@ import toast from 'react-hot-toast';
 import { ActaCompromisoModal } from './ActaCompromisoModal';
 import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
 import { formatDate } from '../../lib/formatDate';
+import { generateMonthlyDates } from '../../lib/monthlySchedule';
+
+const WEEKDAY_TOGGLES = [
+  { day: 1, label: 'Lun' },
+  { day: 2, label: 'Mar' },
+  { day: 3, label: 'Mié' },
+  { day: 4, label: 'Jue' },
+  { day: 5, label: 'Vie' },
+  { day: 6, label: 'Sáb' },
+  { day: 0, label: 'Dom' },
+];
+const DEFAULT_MONTHLY_DAYS = [1, 2, 3, 4, 5];
+type MonthlyDraft = { days: number[]; startTime: string; endTime: string };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -99,6 +112,7 @@ export function MatriculaWizard() {
   const [creatingQuickService, setCreatingQuickService] = useState(false);
   const [addingServiceId, setAddingServiceId] = useState('');
   const [dateDraft, setDateDraft] = useState<Record<string, { date: string; time: string }>>({});
+  const [monthlyDraft, setMonthlyDraft] = useState<Record<string, MonthlyDraft>>({});
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [previousDeposit, setPreviousDeposit] = useState<number>(0);
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -380,6 +394,60 @@ export function MatriculaWizard() {
   // one existing date exactly 7 days later, same time.
   const addWeekAfter = (serviceId: string, sourceDate: string, time: string) => {
     addSessionDate(serviceId, offsetDateStr(sourceDate, 7), time);
+  };
+
+  // ─── Servicio Mensual: relleno automático de un mes de fechas exactas ───────
+  // Sigue siendo el mismo sessionDates de siempre — esto solo ahorra escribir
+  // 20-30 fechas a mano. El cobro nunca cambia de fórmula (unit_price × cantidad
+  // real de fechas), nunca se calcula aparte por una tarifa semanal.
+
+  const getMonthlyDraft = (serviceId: string): MonthlyDraft =>
+    monthlyDraft[serviceId] || { days: DEFAULT_MONTHLY_DAYS, startTime: '08:00', endTime: '13:00' };
+
+  const toggleMonthlyDay = (serviceId: string, day: number) => {
+    setMonthlyDraft(prev => {
+      const current = prev[serviceId] || { days: DEFAULT_MONTHLY_DAYS, startTime: '08:00', endTime: '13:00' };
+      const days = current.days.includes(day) ? current.days.filter(d => d !== day) : [...current.days, day];
+      return { ...prev, [serviceId]: { ...current, days } };
+    });
+  };
+
+  const updateMonthlyTime = (serviceId: string, field: 'startTime' | 'endTime', value: string) => {
+    setMonthlyDraft(prev => {
+      const current = prev[serviceId] || { days: DEFAULT_MONTHLY_DAYS, startTime: '08:00', endTime: '13:00' };
+      return { ...prev, [serviceId]: { ...current, [field]: value } };
+    });
+  };
+
+  const bulkAddSessionDates = (serviceId: string, dates: string[], time: string) => {
+    setEnrollmentServices(prev =>
+      prev.map(e => {
+        if (e.service_id !== serviceId) return e;
+        const existing = new Set(e.sessionDates.map(s => `${s.date}|${s.time}`));
+        const additions = dates.filter(date => !existing.has(`${date}|${time}`)).map(date => ({ date, time }));
+        if (additions.length === 0) return e;
+        const next = [...e.sessionDates, ...additions].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        return { ...e, sessionDates: next };
+      })
+    );
+  };
+
+  const handleGenerateMonthlyDates = (serviceId: string) => {
+    if (!startDate) { toast.error('Define primero la Fecha de Inicio de Clases.'); return; }
+    const draft = getMonthlyDraft(serviceId);
+    if (draft.days.length === 0) { toast.error('Selecciona al menos un día de la semana.'); return; }
+    if (draft.endTime <= draft.startTime) { toast.error('La hora de fin debe ser posterior a la hora de inicio.'); return; }
+
+    const dates = generateMonthlyDates(startDate, draft.days);
+    if (dates.length === 0) { toast.error('No se generó ninguna fecha con esos días.'); return; }
+
+    const [sh, sm] = draft.startTime.split(':').map(Number);
+    const [eh, em] = draft.endTime.split(':').map(Number);
+    const durationMin = (eh * 60 + em) - (sh * 60 + sm);
+
+    bulkAddSessionDates(serviceId, dates, draft.startTime);
+    updateServiceLine(serviceId, 'session_duration_min', durationMin);
+    toast.success(`Se generaron ${dates.length} fechas, del ${formatDate(dates[0])} al ${formatDate(dates[dates.length - 1])}.`);
   };
 
   // ─── Validation ────────────────────────────────────────────────────────────────
@@ -1168,6 +1236,63 @@ export function MatriculaWizard() {
                                   </div>
                                 )}
                               </div>
+
+                              {/* Servicio Mensual: relleno automático de un mes de fechas, solo para modo Continua */}
+                              {svc.billing_mode === 'continuous' && (
+                                <div className="mt-2 ml-2 mr-4 bg-indigo-50/60 border border-indigo-200 rounded-lg p-3 space-y-2.5">
+                                  <p className="text-[11px] font-bold text-indigo-800 uppercase tracking-wider">
+                                    Servicio Mensual — relleno automático
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {WEEKDAY_TOGGLES.map(({ day, label }) => {
+                                      const active = getMonthlyDraft(svc.service_id).days.includes(day);
+                                      return (
+                                        <button
+                                          key={day}
+                                          type="button"
+                                          onClick={() => toggleMonthlyDay(svc.service_id, day)}
+                                          className={`w-9 h-8 rounded-lg text-xs font-bold border transition-colors ${
+                                            active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-300 hover:border-indigo-300'
+                                          }`}
+                                        >
+                                          {label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <div className="flex flex-wrap items-end gap-2">
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">Hora Inicio</label>
+                                      <input
+                                        type="time"
+                                        value={getMonthlyDraft(svc.service_id).startTime}
+                                        onChange={(e) => updateMonthlyTime(svc.service_id, 'startTime', e.target.value)}
+                                        className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400 font-mono"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">Hora Fin</label>
+                                      <input
+                                        type="time"
+                                        value={getMonthlyDraft(svc.service_id).endTime}
+                                        onChange={(e) => updateMonthlyTime(svc.service_id, 'endTime', e.target.value)}
+                                        className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400 font-mono"
+                                      />
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleGenerateMonthlyDates(svc.service_id)}
+                                      className="px-3 py-1.5 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-1"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                      Generar Fechas del Mes
+                                    </button>
+                                  </div>
+                                  <p className="text-[10px] text-indigo-700/70">
+                                    Genera las fechas desde la Fecha de Inicio de Clases hasta un mes después, en los días marcados. Puedes revisar y ajustar la lista de abajo después de generar.
+                                  </p>
+                                </div>
+                              )}
 
                               {/* Exact session dates — picked one by one, no weekday recurrence */}
                               <div className="mt-2.5 ml-2 space-y-1.5">

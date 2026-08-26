@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
 import { Skeleton, SkeletonCircle } from '../../components/ui/Skeleton';
+import { generateMonthlyDates, nextDayLocal, getDayOfWeekLocal } from '../../lib/monthlySchedule';
 import {
   ArrowLeft,
   Baby,
@@ -103,6 +104,7 @@ type EnrollmentServiceRow = {
   unit_price: number;
   sessions_completed: number;
   status: string;
+  billing_mode: 'continuous' | 'finite';
   schedules: ScheduleSlot[];
 };
 
@@ -592,6 +594,7 @@ export function BeneficiaryDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [loading, setLoading] = useState(true);
   const [noteFormPrefill, setNoteFormPrefill] = useState<{ date?: string; serviceId?: string }>({});
+  const [generatingNextMonthFor, setGeneratingNextMonthFor] = useState<string | null>(null);
 
   const [beneficiary, setBeneficiary] = useState<Beneficiary | null>(null);
   const [representatives, setRepresentatives] = useState<Representative[]>([]);
@@ -673,6 +676,7 @@ export function BeneficiaryDetailPage() {
           unit_price: s.unit_price,
           sessions_completed: s.sessions_completed,
           status: s.status,
+          billing_mode: s.billing_mode,
           schedules: (s.enrollment_schedules || []).filter((sch: any) => sch.is_active).map((sch: any) => ({
             id: sch.id,
             day_of_week: sch.day_of_week,
@@ -916,6 +920,77 @@ export function BeneficiaryDetailPage() {
     setIsActaOpen(true);
   };
 
+  // ─── Servicio Mensual: renovación ───────────────────────────────────────────────
+  // Continúa el mismo patrón de días/hora ya guardado en enrollment_schedules
+  // (leído aquí como el registro de "qué patrón se eligió", no como una fuente
+  // de recurrencia automática — la renovación es siempre una acción explícita).
+
+  const handleGenerateNextMonth = async (enrollment: Enrollment, svc: EnrollmentServiceRow) => {
+    if (!currentOrg || !id) return;
+    if (svc.schedules.length === 0) {
+      toast.error('Este servicio no tiene un horario guardado — genera fechas desde la Matrícula primero.');
+      return;
+    }
+
+    setGeneratingNextMonthFor(svc.id);
+    try {
+      const { data: lastAttendance } = await (supabase as any)
+        .from('attendance')
+        .select('session_date')
+        .eq('beneficiary_id', id)
+        .eq('service_id', svc.service_id)
+        .order('session_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const rangeStart = lastAttendance?.session_date ? nextDayLocal(lastAttendance.session_date) : enrollment.start_date;
+      const daysOfWeek = [...new Set(svc.schedules.map(s => s.day_of_week))];
+      const dates = generateMonthlyDates(rangeStart, daysOfWeek);
+
+      if (dates.length === 0) {
+        toast.error('No se generó ninguna fecha nueva — revisa el horario guardado de este servicio.');
+        return;
+      }
+
+      const scheduleByDay = new Map(svc.schedules.map(s => [s.day_of_week, s]));
+      const attendanceRows = dates.map(date => {
+        const schedule = scheduleByDay.get(getDayOfWeekLocal(date));
+        return {
+          organization_id: currentOrg.id,
+          beneficiary_id: id,
+          session_date: date,
+          status: 'scheduled',
+          service_id: svc.service_id,
+          enrollment_schedule_id: schedule?.id ?? null,
+          scheduled_time: schedule ? `${schedule.start_time}:00` : null,
+        };
+      });
+
+      const { error: attError } = await (supabase as any).from('attendance').insert(attendanceRows);
+      if (attError) throw attError;
+
+      const amount = svc.unit_price * dates.length;
+      const { error: chargeError } = await (supabase as any).from('charges').insert({
+        organization_id: currentOrg.id,
+        beneficiary_id: id,
+        enrollment_id: enrollment.id,
+        description: `Renovación mensual: ${svc.service_name}`,
+        amount,
+        due_date: dates[0],
+        status: 'pending',
+        period_label: `${formatDate(dates[0])} - ${formatDate(dates[dates.length - 1])}`,
+      });
+      if (chargeError) throw chargeError;
+
+      toast.success(`Se generaron ${dates.length} fechas nuevas y un cargo de $${amount.toFixed(2)}.`);
+      await loadAll();
+    } catch (err: any) {
+      toast.error('Error generando el próximo mes: ' + err.message);
+    } finally {
+      setGeneratingNextMonthFor(null);
+    }
+  };
+
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -992,9 +1067,9 @@ export function BeneficiaryDetailPage() {
       <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl p-6 text-white relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMzAiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-30" />
         
-        <div className="relative flex items-center gap-6">
+        <div className="relative flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
           {/* Avatar / Photo */}
-          <div className="relative flex-shrink-0">
+          <div className="relative flex-shrink-0 self-center sm:self-auto">
             {photoDisplayUrl ? (
               <img
                 src={photoDisplayUrl}
@@ -1046,10 +1121,10 @@ export function BeneficiaryDetailPage() {
           </div>
 
           {/* Actions */}
-          <div className="flex flex-col gap-2 ml-auto">
+          <div className="flex flex-col gap-2 sm:ml-auto">
             <button
               onClick={() => setShowEditModal(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-sm font-bold transition-colors border border-white/20"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-sm font-bold transition-colors border border-white/20"
             >
               <Edit2 className="w-4 h-4" />
               Editar
@@ -1057,7 +1132,7 @@ export function BeneficiaryDetailPage() {
             {hasEnrollment && (
               <button
                 onClick={openActa}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-sm font-bold transition-colors border border-white/20"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-sm font-bold transition-colors border border-white/20"
               >
                 <FileText className="w-4 h-4" />
                 Acta de Compromiso
@@ -1065,7 +1140,7 @@ export function BeneficiaryDetailPage() {
             )}
             <button
               onClick={() => navigate(`/app/matricula?beneficiaryId=${id}`)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-sm font-bold transition-colors shadow-md"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-sm font-bold transition-colors shadow-md"
             >
               <Plus className="w-4 h-4" />
               Nueva Inscripción
@@ -1270,6 +1345,7 @@ export function BeneficiaryDetailPage() {
                             <th className="px-4 py-2 text-center">Precio/Sesión</th>
                             <th className="px-4 py-2 text-center">Ses. Completadas</th>
                             <th className="px-4 py-2 text-center">Estado</th>
+                            <th className="px-4 py-2 text-center"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -1301,6 +1377,20 @@ export function BeneficiaryDetailPage() {
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusColor(svc.status)}`}>
                                   {statusLabel(svc.status)}
                                 </span>
+                              </td>
+                              <td className="px-4 py-3 text-center align-top">
+                                {svc.billing_mode === 'continuous' && enr.status === 'active' && svc.status === 'active' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleGenerateNextMonth(enr, svc)}
+                                    disabled={generatingNextMonthFor === svc.id}
+                                    title="Generar las fechas y el cargo del siguiente mes, continuando el mismo horario"
+                                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-50 whitespace-nowrap"
+                                  >
+                                    {generatingNextMonthFor === svc.id && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                    Generar Próximo Mes
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           ))}
