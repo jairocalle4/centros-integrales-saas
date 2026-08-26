@@ -333,7 +333,7 @@ export function PlatformDashboard() {
     setSavingBrevo(true);
     try {
       const trimmedKey = brevoApiKeyInput.trim();
-      const update: Record<string, string> = {
+      const update: { brevo_sender_email: string; brevo_sender_name: string; brevo_api_key?: string } = {
         brevo_sender_email: brevoSenderEmail.trim(),
         brevo_sender_name: brevoSenderName.trim(),
       };
