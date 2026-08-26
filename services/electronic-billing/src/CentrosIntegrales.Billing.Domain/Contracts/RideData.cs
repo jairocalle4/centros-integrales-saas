@@ -41,7 +41,13 @@ public class TaxDetail
     public required string PercentageCode { get; set; } // "4" = 15%, "2" = 12%, "0" = 0%
     public decimal Rate { get; set; } // 15, 12, 0
     public decimal TaxableBase { get; set; }
-    public decimal TaxAmount => Math.Round(TaxableBase * (Rate / 100m), 2, MidpointRounding.AwayFromZero);
+    // Asignado por el llamador (Edge Function), no recalculado aquí: el XML
+    // ya autorizado por el SRI es la fuente de verdad del valor exacto del
+    // IVA (base × tarifa puede redondear distinto que "total - base", que
+    // es como se calculó ese valor originalmente) — recalcularlo de forma
+    // independiente puede descuadrar el RIDE en ±1 centavo contra el XML
+    // legal.
+    public decimal TaxAmount { get; set; }
 }
 
 public class PaymentDetail

@@ -650,6 +650,9 @@ export type Database = {
           payment_date: string
           reference: string | null
           sri_document_id: string | null
+          voided_at: string | null
+          voided_by: string | null
+          voided_reason: string | null
         }
         Insert: {
           amount: number
@@ -663,6 +666,9 @@ export type Database = {
           payment_date?: string
           reference?: string | null
           sri_document_id?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
+          voided_reason?: string | null
         }
         Update: {
           amount?: number
@@ -676,6 +682,9 @@ export type Database = {
           payment_date?: string
           reference?: string | null
           sri_document_id?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
+          voided_reason?: string | null
         }
         Relationships: [
           {
@@ -893,16 +902,25 @@ export type Database = {
       }
       platform_settings: {
         Row: {
+          brevo_api_key: string | null
+          brevo_sender_email: string | null
+          brevo_sender_name: string | null
           id: boolean
           iva_percentage: number
           updated_at: string
         }
         Insert: {
+          brevo_api_key?: string | null
+          brevo_sender_email?: string | null
+          brevo_sender_name?: string | null
           id?: boolean
           iva_percentage?: number
           updated_at?: string
         }
         Update: {
+          brevo_api_key?: string | null
+          brevo_sender_email?: string | null
+          brevo_sender_name?: string | null
           id?: boolean
           iva_percentage?: number
           updated_at?: string
@@ -1118,6 +1136,7 @@ export type Database = {
           id: string
           organization_id: string
           punto_emision: string
+          regimen_fiscal: string
           sri_api_emisor_id: string | null
           updated_at: string
         }
@@ -1131,6 +1150,7 @@ export type Database = {
           id?: string
           organization_id: string
           punto_emision?: string
+          regimen_fiscal?: string
           sri_api_emisor_id?: string | null
           updated_at?: string
         }
@@ -1144,6 +1164,7 @@ export type Database = {
           id?: string
           organization_id?: string
           punto_emision?: string
+          regimen_fiscal?: string
           sri_api_emisor_id?: string | null
           updated_at?: string
         }
@@ -1162,13 +1183,19 @@ export type Database = {
           authorization_date: string | null
           authorization_number: string | null
           clave_acceso: string | null
+          cliente_email: string | null
           cliente_identificacion: string
+          cliente_razon_social: string | null
           created_at: string
           document_type: string
+          email_sent_at: string | null
+          email_sent_to: string | null
+          environment_aplicado: string
           fecha_emision: string
           id: string
           organization_id: string
           pdf_url: string | null
+          regimen_fiscal_aplicado: string
           secuencial: string
           status: string
           total: number
@@ -1179,13 +1206,19 @@ export type Database = {
           authorization_date?: string | null
           authorization_number?: string | null
           clave_acceso?: string | null
+          cliente_email?: string | null
           cliente_identificacion: string
+          cliente_razon_social?: string | null
           created_at?: string
           document_type?: string
+          email_sent_at?: string | null
+          email_sent_to?: string | null
+          environment_aplicado?: string
           fecha_emision?: string
           id?: string
           organization_id: string
           pdf_url?: string | null
+          regimen_fiscal_aplicado?: string
           secuencial: string
           status?: string
           total?: number
@@ -1196,13 +1229,19 @@ export type Database = {
           authorization_date?: string | null
           authorization_number?: string | null
           clave_acceso?: string | null
+          cliente_email?: string | null
           cliente_identificacion?: string
+          cliente_razon_social?: string | null
           created_at?: string
           document_type?: string
+          email_sent_at?: string | null
+          email_sent_to?: string | null
+          environment_aplicado?: string
           fecha_emision?: string
           id?: string
           organization_id?: string
           pdf_url?: string | null
+          regimen_fiscal_aplicado?: string
           secuencial?: string
           status?: string
           total?: number
