@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
@@ -18,6 +18,7 @@ import {
   GraduationCap,
   ExternalLink,
   History,
+  BookOpen,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -156,9 +157,10 @@ interface SessionRowProps {
   savingKey: string | null;
   onMark: (attendanceId: string, status: AttendanceStatus) => Promise<void>;
   onNavigate: (beneficiaryId: string) => void;
+  onRegisterProgress: (session: ScheduledSession) => void;
 }
 
-function SessionRow({ session, selectedDate, savingKey, onMark, onNavigate }: SessionRowProps) {
+function SessionRow({ session, selectedDate, savingKey, onMark, onNavigate, onRegisterProgress }: SessionRowProps) {
   const isSaving = savingKey === session.attendance_id;
   const initials = `${session.first_name[0] ?? ''}${session.last_name[0] ?? ''}`.toUpperCase();
   const fullName = `${session.first_name} ${session.last_name}`;
@@ -217,6 +219,16 @@ function SessionRow({ session, selectedDate, savingKey, onMark, onNavigate }: Se
                 Llegó: {formatTime(session.actual_arrival_time)}
               </span>
             )}
+            {(session.status === 'present' || session.status === 'late') && (
+              <button
+                onClick={() => onRegisterProgress(session)}
+                title="Registrar el avance de esta sesión"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-full transition-colors"
+              >
+                <BookOpen className="w-3 h-3" />
+                Registrar Avance
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -273,6 +285,7 @@ export function AsistenciaModule() {
   const { currentOrg } = useOrg();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [selectedDate, setSelectedDate] = useState<string>(() => toLocalISODate(new Date()));
   const [sessions, setSessions] = useState<ScheduledSession[]>([]);
@@ -331,6 +344,20 @@ export function AsistenciaModule() {
   }, [currentOrg, selectedDate]);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // Consume the deep-linked ?date= (e.g. from "Registrar" in Historial de
+  // Asistencia). Reacts to searchParams itself, not just on mount — "Registrar"
+  // can be clicked from a modal opened on this same route, which updates the
+  // URL without remounting the component, so a mount-only effect would miss it.
+  useEffect(() => {
+    const d = searchParams.get('date');
+    if (d) {
+      setSelectedDate(d);
+      const next = new URLSearchParams(searchParams);
+      next.delete('date');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // ─── Justified absences: offer a makeup session ──────────────────────────────
   // Domain rule (also printed on the signed Acta de Compromiso): at most
@@ -602,6 +629,9 @@ export function AsistenciaModule() {
                   savingKey={savingKey}
                   onMark={handleMark}
                   onNavigate={(id) => navigate(`/app/beneficiarios/${id}`)}
+                  onRegisterProgress={(s) => navigate(
+                    `/app/beneficiarios/${s.beneficiary_id}?tab=progreso&openNote=1&noteDate=${selectedDate}&catalogServiceId=${s.service_id}`
+                  )}
                 />
               ))}
             </div>

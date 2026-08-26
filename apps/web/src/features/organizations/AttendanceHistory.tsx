@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
-import { X, Search, History, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { X, Search, History, CheckCircle, XCircle, Clock, AlertCircle, CalendarCheck } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,10 +62,15 @@ export { resolveRecordedByNames };
 export function AttendanceHistoryTable({
   rows,
   showBeneficiary = true,
+  onBeforeNavigate,
 }: {
   rows: AttendanceHistoryRow[];
   showBeneficiary?: boolean;
+  /** Called right before navigating away (e.g. "Registrar") — lets a wrapping modal close itself first. */
+  onBeforeNavigate?: () => void;
 }) {
+  const navigate = useNavigate();
+
   if (rows.length === 0) {
     return (
       <div className="py-16 text-center">
@@ -105,10 +110,26 @@ export function AttendanceHistoryTable({
                 <td className="px-4 py-3 text-slate-600">{row.service_name}</td>
                 <td className="px-4 py-3 text-center font-mono text-slate-700">{formatTime(row.scheduled_time)}</td>
                 <td className="px-4 py-3 text-center">
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${cfg.bg} ${cfg.text}`}>
-                    {cfg.icon}
-                    {cfg.label}
-                  </span>
+                  <div className="flex flex-col items-center gap-1">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${cfg.bg} ${cfg.text}`}>
+                      {cfg.icon}
+                      {cfg.label}
+                    </span>
+                    {row.status === 'scheduled' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onBeforeNavigate?.();
+                          navigate(`/app/asistencia?date=${row.session_date}`);
+                        }}
+                        title="Ir a Asistencia para registrar esta cita"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                      >
+                        <CalendarCheck className="w-3 h-3" />
+                        Registrar
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-center font-mono text-slate-500">
                   {row.status === 'late' && row.actual_arrival_time ? formatTime(row.actual_arrival_time) : '—'}
@@ -271,7 +292,7 @@ export function AttendanceHistoryModal({
           {loading ? (
             <div className="p-10 text-center text-slate-400 animate-pulse text-sm">Cargando historial...</div>
           ) : (
-            <AttendanceHistoryTable rows={filtered} showBeneficiary />
+            <AttendanceHistoryTable rows={filtered} showBeneficiary onBeforeNavigate={onClose} />
           )}
         </div>
       </div>

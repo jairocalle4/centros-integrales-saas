@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router';
 import { supabase } from '../../lib/supabase';
-import { Building2, ArrowLeft, Users, Mail, CreditCard, Trash2, ShieldCheck, Check, Clock, AlertCircle, PackageCheck, FileKey2 } from 'lucide-react';
+import { Building2, ArrowLeft, Users, Mail, CreditCard, Trash2, ShieldCheck, Check, Clock, AlertCircle, PackageCheck, FileKey2, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { formatDate } from '../../lib/formatDate';
@@ -618,8 +618,9 @@ export function PlatformOrganizationDetail() {
                   <button
                     onClick={handleSaveSriEnvironment}
                     disabled={savingSriEnv || sriEnvironment === sriConfig.environment}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap"
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap"
                   >
+                    {savingSriEnv && <Loader2 className="w-4 h-4 animate-spin" />}
                     {savingSriEnv ? 'Guardando...' : 'Guardar'}
                   </button>
                 </div>
@@ -681,8 +682,9 @@ export function PlatformOrganizationDetail() {
                 <button
                   type="submit"
                   disabled={isSubmittingInvite}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
                 >
+                  {isSubmittingInvite && <Loader2 className="w-4 h-4 animate-spin" />}
                   {isSubmittingInvite ? 'Enviando...' : 'Enviar Invitación'}
                 </button>
               </div>
@@ -736,8 +738,9 @@ export function PlatformOrganizationDetail() {
                 <button
                   type="submit"
                   disabled={isSubmittingPayment}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
                 >
+                  {isSubmittingPayment && <Loader2 className="w-4 h-4 animate-spin" />}
                   {isSubmittingPayment ? 'Registrando...' : 'Confirmar Pago'}
                 </button>
               </div>

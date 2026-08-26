@@ -18,6 +18,7 @@ import {
   Calendar,
   Phone,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import { ActaCompromisoModal } from './ActaCompromisoModal';
 import type { CommitmentData } from './ActaCompromisoModal';
@@ -527,6 +528,7 @@ export function BeneficiaryModal({
               disabled={submitting}
               className="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer"
             >
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
               {submitting ? 'Guardando...' : mode === 'create' ? 'Guardar y Vincular' : 'Guardar Cambios'}
             </button>
           </div>

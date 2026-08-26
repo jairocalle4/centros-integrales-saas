@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { supabase } from '../../lib/supabase';
 import { useNavigate, useLocation } from 'react-router';
-import { Building2, Pencil } from 'lucide-react';
+import { Building2, Pencil, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const resetSchema = z.object({
@@ -296,8 +296,9 @@ export function ResetPassword() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 py-2.5 px-4 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-indigo-400 disabled:cursor-not-allowed transition-colors"
+                className="flex w-full justify-center items-center gap-2 rounded-md border border-transparent bg-indigo-600 py-2.5 px-4 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-indigo-400 disabled:cursor-not-allowed transition-colors"
               >
+                {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 {isSubmitting ? 'Guardando...' : (isFirstTime ? 'Comenzar a usar NexoKids' : 'Actualizar contraseña')}
               </button>
             </div>

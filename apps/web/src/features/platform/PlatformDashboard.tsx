@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../auth/AuthProvider';
 import toast from 'react-hot-toast';
 import { formatDate } from '../../lib/formatDate';
+import { Loader2 } from 'lucide-react';
 
 type Organization = {
   id: string;
@@ -104,6 +105,10 @@ export function PlatformDashboard() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+
+  // Configuración: sub-navegación interna del módulo unificado (Mi Cuenta / Plataforma)
+  const [configSubTab, setConfigSubTab] = useState<'cuenta' | 'plataforma'>('cuenta');
 
   // Plan States
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -120,6 +125,17 @@ export function PlatformDashboard() {
   // Platform-wide Settings (IVA, etc.)
   const [ivaPercentage, setIvaPercentage] = useState<number>(15);
   const [savingSettings, setSavingSettings] = useState(false);
+
+  // Brevo (envío de facturas por correo) — brevoApiKeyInput es write-only:
+  // nunca se carga desde la base de datos, solo viaja hacia ella cuando el
+  // superadmin escribe una nueva. brevoConfigured es un booleano derivado
+  // en memoria al cargar (nunca se guarda la key real en el estado), solo
+  // para mostrar "ya configurada" sin volver a exponerla en un input.
+  const [brevoApiKeyInput, setBrevoApiKeyInput] = useState('');
+  const [brevoConfigured, setBrevoConfigured] = useState(false);
+  const [brevoSenderEmail, setBrevoSenderEmail] = useState('');
+  const [brevoSenderName, setBrevoSenderName] = useState('');
+  const [savingBrevo, setSavingBrevo] = useState(false);
 
 
 
@@ -144,10 +160,17 @@ export function PlatformDashboard() {
     const loadPlatformSettings = async () => {
       const { data } = await supabase
         .from('platform_settings')
-        .select('iva_percentage')
+        .select('iva_percentage, brevo_api_key, brevo_sender_email, brevo_sender_name')
         .eq('id', true)
         .maybeSingle();
-      if (data) setIvaPercentage(Number(data.iva_percentage));
+      if (data) {
+        setIvaPercentage(Number(data.iva_percentage));
+        // El valor real de brevo_api_key nunca se guarda en el estado —
+        // solo se usa aquí mismo para derivar este booleano.
+        setBrevoConfigured(Boolean(data.brevo_api_key));
+        setBrevoSenderEmail(data.brevo_sender_email || '');
+        setBrevoSenderName(data.brevo_sender_name || '');
+      }
     };
     loadPlatformSettings();
   }, [user]);
@@ -305,6 +328,32 @@ export function PlatformDashboard() {
     }
   };
 
+  const handleSaveBrevo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingBrevo(true);
+    try {
+      const trimmedKey = brevoApiKeyInput.trim();
+      const update: Record<string, string> = {
+        brevo_sender_email: brevoSenderEmail.trim(),
+        brevo_sender_name: brevoSenderName.trim(),
+      };
+      // Dejar el campo en blanco conserva la API Key ya guardada — solo se
+      // sobrescribe si el superadmin escribió una nueva.
+      if (trimmedKey) update.brevo_api_key = trimmedKey;
+
+      const { error } = await supabase.from('platform_settings').update(update).eq('id', true);
+      if (error) throw error;
+
+      if (trimmedKey) setBrevoConfigured(true);
+      setBrevoApiKeyInput('');
+      toast.success('Configuración de correo (Brevo) guardada.');
+    } catch (err: any) {
+      toast.error('Error guardando la configuración de Brevo: ' + err.message);
+    } finally {
+      setSavingBrevo(false);
+    }
+  };
+
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -341,6 +390,7 @@ export function PlatformDashboard() {
       toast.success('Contraseña actualizada correctamente.');
       setNewPassword('');
       setConfirmPassword('');
+      setShowPasswordForm(false);
     }
   };
 
@@ -451,8 +501,7 @@ export function PlatformDashboard() {
             activeTab === 'tenants' ? 'Centros Integrales' :
             activeTab === 'plans' ? 'Planes & Licencias' :
             activeTab === 'audit' ? 'Auditoría' :
-            activeTab === 'settings' ? 'Configuración de Plataforma' :
-            activeTab === 'profile' ? 'Mi Perfil & Config.' : 'Dashboard General'
+            activeTab === 'settings' ? 'Configuración' : 'Dashboard General'
           }
         </h1>
         <p className="text-sm text-slate-500 mt-1">
@@ -1188,211 +1237,339 @@ export function PlatformDashboard() {
           );
         })()}
 
-        {/* PESTAÑA 4: Mi Perfil & Seguridad */}
-        {activeTab === 'profile' && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Formulario Datos Personales */}
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-                <h2 className="text-lg font-bold text-slate-900 mb-4">Datos del Superusuario</h2>
-
-                <form onSubmit={handleSaveProfile} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Correo Electrónico</label>
-                    <input
-                      type="text"
-                      value={user?.email || ''}
-                      disabled
-                      className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-2 text-sm text-slate-500 cursor-not-allowed font-medium"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
-                    <input
-                      type="text"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="Tu nombre"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Apellido</label>
-                    <input
-                      type="text"
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder="Tu apellido"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors cursor-pointer"
-                  >
-                    Guardar Perfil
-                  </button>
-                </form>
-              </div>
-
-              {/* Formulario Cambio de Contraseña */}
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-                <h2 className="text-lg font-bold text-slate-900 mb-4">Seguridad de la Cuenta</h2>
-
-                <form onSubmit={handleChangePassword} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Nueva Contraseña</label>
-                    <div className="relative">
-                      <input
-                        type={showNewPassword ? 'text' : 'password'}
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPassword(!showNewPassword)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 focus:outline-none"
-                      >
-                        {showNewPassword ? (
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.858A9.954 9.954 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.592-4.592a3 3 0 11-4.243-4.243m4.242 4.242L3 3l18 18" />
-                          </svg>
-                        ) : (
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Confirmar Nueva Contraseña</label>
-                    <div className="relative">
-                      <input
-                        type={showConfirmPassword ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 focus:outline-none"
-                      >
-                        {showConfirmPassword ? (
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.858A9.954 9.954 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.592-4.592a3 3 0 11-4.243-4.243m4.242 4.242L3 3l18 18" />
-                          </svg>
-                        ) : (
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors cursor-pointer"
-                  >
-                    Actualizar Contraseña
-                  </button>
-                </form>
-              </div>
+        {/* PESTAÑA 4: Configuración (Mi Cuenta + Plataforma, un solo módulo) */}
+        {activeTab === 'settings' && (
+          <div className="space-y-6">
+            {/* Sub-navegación interna */}
+            <div className="flex bg-slate-100 p-1 rounded-xl gap-1 w-fit">
+              <button
+                type="button"
+                onClick={() => setConfigSubTab('cuenta')}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                  configSubTab === 'cuenta'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                👤 Mi Cuenta
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfigSubTab('plataforma')}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                  configSubTab === 'plataforma'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                ⚙️ Plataforma
+              </button>
             </div>
 
-            {/* Equipo de Superadministradores de la Plataforma */}
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">Equipo de Superadministradores</h2>
-                  <p className="text-sm text-slate-500 mt-0.5">
-                    Usuarios con acceso de control total a la plataforma (`platform_admins`).
-                  </p>
-                </div>
-                <span className="text-xs font-bold px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full">
-                  {platformAdmins.length} Administrador(es)
-                </span>
-              </div>
+            {configSubTab === 'cuenta' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start animate-fadeIn">
+                {/* Columna principal: perfil + equipo */}
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Formulario Datos Personales */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
+                    <h2 className="text-lg font-bold text-slate-900 mb-4">Datos del Superusuario</h2>
 
-              <div className="divide-y divide-slate-100">
-                {platformAdmins.map((adm) => {
-                  const isCurrent = adm.user_id === user?.id;
-                  const name = adm.profiles?.first_name ? `${adm.profiles.first_name} ${adm.profiles.last_name || ''}` : 'Superusuario';
-                  return (
-                    <div key={adm.user_id} className="py-3 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm shadow-xs">
-                          {name[0] || 'S'}
-                        </div>
+                    <form onSubmit={handleSaveProfile} className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Correo Electrónico</label>
+                        <input
+                          type="text"
+                          value={user?.email || ''}
+                          disabled
+                          className="w-full bg-slate-100 border border-slate-200 rounded-lg px-4 py-2 text-sm text-slate-500 cursor-not-allowed font-medium"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <p className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                            {name}
-                            {isCurrent && (
-                              <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                                Tú
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-xs text-slate-400 font-mono">ID: {adm.user_id}</p>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
+                          <input
+                            type="text"
+                            value={firstName}
+                            onChange={(e) => setFirstName(e.target.value)}
+                            placeholder="Tu nombre"
+                            className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Apellido</label>
+                          <input
+                            type="text"
+                            value={lastName}
+                            onChange={(e) => setLastName(e.target.value)}
+                            placeholder="Tu apellido"
+                            className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
                         </div>
                       </div>
-                      <span className="text-xs text-slate-400 font-mono">
-                        {formatDate(adm.created_at)}
+
+                      <button
+                        type="submit"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors cursor-pointer"
+                      >
+                        Guardar Perfil
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Equipo de Superadministradores de la Plataforma */}
+                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">Equipo de Superadministradores</h2>
+                        <p className="text-sm text-slate-500 mt-0.5">
+                          Usuarios con acceso de control total a la plataforma (`platform_admins`).
+                        </p>
+                      </div>
+                      <span className="text-xs font-bold px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full whitespace-nowrap">
+                        {platformAdmins.length} Administrador(es)
                       </span>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* PESTAÑA 5: Configuración de la Plataforma */}
-        {activeTab === 'settings' && (
-          <div className="space-y-8">
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs max-w-md">
-              <h2 className="text-lg font-bold text-slate-900 mb-1">Impuestos</h2>
-              <p className="text-sm text-slate-500 mb-4">
-                Porcentaje de IVA usado como referencia para la facturación electrónica.
-                Por ahora los montos se registran ya incluyendo IVA — este valor todavía
-                no se aplica automáticamente en ningún cálculo.
-              </p>
-
-              <form onSubmit={handleSaveSettings} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Porcentaje de IVA (%)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    value={ivaPercentage}
-                    onChange={(e) => setIvaPercentage(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    required
-                  />
+                    <div className="divide-y divide-slate-100">
+                      {platformAdmins.map((adm) => {
+                        const isCurrent = adm.user_id === user?.id;
+                        const name = adm.profiles?.first_name ? `${adm.profiles.first_name} ${adm.profiles.last_name || ''}` : 'Superusuario';
+                        return (
+                          <div key={adm.user_id} className="py-3 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm shadow-xs">
+                                {name[0] || 'S'}
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                                  {name}
+                                  {isCurrent && (
+                                    <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                      Tú
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="text-xs text-slate-400 font-mono">ID: {adm.user_id}</p>
+                              </div>
+                            </div>
+                            <span className="text-xs text-slate-400 font-mono">
+                              {formatDate(adm.created_at)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
-                >
-                  {savingSettings ? 'Guardando...' : 'Guardar Configuración'}
-                </button>
-              </form>
-            </div>
+                {/* Columna lateral: Seguridad de la Cuenta — cambio de contraseña colapsado por defecto */}
+                <div className="lg:col-span-1 bg-white p-6 rounded-xl border border-slate-200 shadow-xs lg:sticky lg:top-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">Seguridad de la Cuenta</h2>
+                      <p className="text-sm text-slate-500 mt-0.5">Contraseña de acceso al panel de superadmin.</p>
+                    </div>
+                  </div>
+
+                  {!showPasswordForm && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswordForm(true)}
+                      className="mt-4 inline-flex items-center justify-center gap-2 w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold px-4 py-2.5 rounded-lg text-sm shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                      Cambiar Contraseña
+                    </button>
+                  )}
+
+                  <div
+                    className={`grid transition-all duration-300 ease-out ${
+                      showPasswordForm ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                    }`}
+                  >
+                    <div className="overflow-hidden">
+                      <form onSubmit={handleChangePassword} className="space-y-4 pt-5 mt-5 border-t border-slate-100">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Nueva Contraseña</label>
+                          <div className="relative">
+                            <input
+                              type={showNewPassword ? 'text' : 'password'}
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowNewPassword(!showNewPassword)}
+                              className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 focus:outline-none"
+                            >
+                              {showNewPassword ? (
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.858A9.954 9.954 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.592-4.592a3 3 0 11-4.243-4.243m4.242 4.242L3 3l18 18" />
+                                </svg>
+                              ) : (
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Confirmar Nueva Contraseña</label>
+                          <div className="relative">
+                            <input
+                              type={showConfirmPassword ? 'text' : 'password'}
+                              value={confirmPassword}
+                              onChange={(e) => setConfirmPassword(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                              className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 focus:outline-none"
+                            >
+                              {showConfirmPassword ? (
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.858A9.954 9.954 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.592-4.592a3 3 0 11-4.243-4.243m4.242 4.242L3 3l18 18" />
+                                </svg>
+                              ) : (
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="submit"
+                            className="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors cursor-pointer"
+                          >
+                            Actualizar Contraseña
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setShowPasswordForm(false); setNewPassword(''); setConfirmPassword(''); }}
+                            className="px-4 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {configSubTab === 'plataforma' && (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start animate-fadeIn">
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
+                  <h2 className="text-lg font-bold text-slate-900 mb-1">Impuestos</h2>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Porcentaje de IVA usado como referencia para la facturación electrónica.
+                    Por ahora los montos se registran ya incluyendo IVA — este valor todavía
+                    no se aplica automáticamente en ningún cálculo.
+                  </p>
+
+                  <form onSubmit={handleSaveSettings} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Porcentaje de IVA (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={ivaPercentage}
+                        onChange={(e) => setIvaPercentage(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={savingSettings}
+                      className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingSettings && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {savingSettings ? 'Guardando...' : 'Guardar Configuración'}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
+                  <div className="flex items-center justify-between mb-1">
+                    <h2 className="text-lg font-bold text-slate-900">Correo de Facturas (Brevo)</h2>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      brevoConfigured ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      {brevoConfigured ? 'Configurada' : 'Sin configurar'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Credenciales de la API transaccional de Brevo usadas para enviar automáticamente el RIDE y el XML de cada factura autorizada al correo del cliente. Se comparte entre todos los centros de la plataforma.
+                  </p>
+
+                  <form onSubmit={handleSaveBrevo} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">API Key de Brevo</label>
+                      <input
+                        type="password"
+                        value={brevoApiKeyInput}
+                        onChange={(e) => setBrevoApiKeyInput(e.target.value)}
+                        placeholder={brevoConfigured ? 'Ya configurada — deja en blanco para no cambiarla' : 'xkeysib-...'}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <p className="text-xs text-slate-400 mt-1">
+                        Generar en Brevo → Configuración → SMTP y API → API Keys. Distinta de la clave SMTP que ya usa el envío de invitaciones.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Correo Remitente</label>
+                      <input
+                        type="email"
+                        value={brevoSenderEmail}
+                        onChange={(e) => setBrevoSenderEmail(e.target.value)}
+                        placeholder="facturacion@tudominio.com"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <p className="text-xs text-slate-400 mt-1">Debe estar verificado en Brevo, o los envíos se rechazan.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Remitente</label>
+                      <input
+                        type="text"
+                        value={brevoSenderName}
+                        onChange={(e) => setBrevoSenderName(e.target.value)}
+                        placeholder="Facturación Electrónica"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={savingBrevo}
+                      className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingBrevo && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {savingBrevo ? 'Guardando...' : 'Guardar Configuración'}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
         </div>
@@ -1448,8 +1625,9 @@ export function PlatformDashboard() {
                 <button
                   type="submit"
                   disabled={isSubmittingOrg || !newOrgPlanId}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
                 >
+                  {isSubmittingOrg && <Loader2 className="w-4 h-4 animate-spin" />}
                   {isSubmittingOrg ? 'Registrando...' : 'Crear Centro'}
                 </button>
               </div>
@@ -1550,8 +1728,9 @@ export function PlatformDashboard() {
                 <button
                   type="submit"
                   disabled={isSubmittingPlan}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
                 >
+                  {isSubmittingPlan && <Loader2 className="w-4 h-4 animate-spin" />}
                   {isSubmittingPlan ? 'Guardando...' : 'Guardar Plan'}
                 </button>
               </div>

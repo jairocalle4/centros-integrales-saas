@@ -13,6 +13,7 @@ import {
   Phone,
   Mail,
   HeartHandshake,
+  Loader2,
 } from 'lucide-react';
 import { SkeletonTable } from '../../components/ui/Skeleton';
 
@@ -472,8 +473,9 @@ export function RepresentantesModule() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
                 >
+                  {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   {isSubmitting ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>

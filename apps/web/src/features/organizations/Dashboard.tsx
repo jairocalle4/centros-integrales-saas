@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { ElectronicBillingSettings } from '../billing/ElectronicBillingSettings';
+import { Loader2 } from 'lucide-react';
 
 type Member = {
   id: string;
@@ -226,11 +227,12 @@ export function Dashboard() {
                   <option value="staff">Staff</option>
                 </select>
               </div>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isInvitingSubmitting}
-                className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-indigo-400"
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-indigo-400"
               >
+                {isInvitingSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 {isInvitingSubmitting ? 'Enviando...' : 'Enviar'}
               </button>
             </form>

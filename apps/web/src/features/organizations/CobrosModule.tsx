@@ -41,6 +41,14 @@ type Beneficiary = {
   last_name: string;
 };
 
+// "Pendiente" y "Parcial" son el mismo concepto visto desde el cargo: algo
+// todavía se debe. La distinción solo importa a nivel de pago individual
+// (cuánto de ese cargo ya se cubrió), no como dos estados separados de
+// filtro/badge — por eso se muestran y filtran juntos aquí.
+function isPendingLike(status: string): boolean {
+  return status === 'pending' || status === 'partial';
+}
+
 export function CobrosModule() {
   const { currentOrg, hasElectronicBilling, hasSriCertificate } = useOrg();
   const canEmitInvoices = hasElectronicBilling && hasSriCertificate;
@@ -49,22 +57,10 @@ export function CobrosModule() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [beneficiaryFilter, setBeneficiaryFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [activeTab, setActiveTab] = useState<'cobros' | 'servicios'>('cobros');
-
-  // Modal Crear Cargo
-  const [isChargeModalOpen, setIsChargeModalOpen] = useState(false);
-  const [selectedBenId, setSelectedBenId] = useState('');
-  const [chargeDescription, setChargeDescription] = useState('');
-  const [chargeAmount, setChargeAmount] = useState<number | ''>('');
-  const [chargeDueDate, setChargeDueDate] = useState('');
-  const [periodLabel, setPeriodLabel] = useState('');
-  const [chargeNotes, setChargeNotes] = useState('');
-  const [isSubmittingCharge, setIsSubmittingCharge] = useState(false);
-  // Optional: register a payment against this same charge right away
-  const [registerPaymentNow, setRegisterPaymentNow] = useState(false);
-  const [initialPaymentAmount, setInitialPaymentAmount] = useState<number | ''>('');
-  const [initialPaymentMethod, setInitialPaymentMethod] = useState('cash');
-  const [initialPaymentDate, setInitialPaymentDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Modal Registrar Pago
   const [payingCharge, setPayingCharge] = useState<Charge | null>(null);
@@ -117,7 +113,7 @@ export function CobrosModule() {
       // Load internal payments to sum paid amounts per charge
       const { data: pmtsData } = await supabase
         .from('internal_payments')
-        .select('*')
+        .select('*, sri_documents ( status, pdf_url, cliente_email, email_sent_at )')
         .eq('organization_id', currentOrg.id)
         .order('payment_date', { ascending: false });
 
@@ -125,6 +121,7 @@ export function CobrosModule() {
         setInternalPayments(pmtsData as Payment[]);
         const pMap: Record<string, number> = {};
         pmtsData.forEach((p: any) => {
+          if (p.voided_at) return; // pago anulado — no cuenta para el saldo
           pMap[p.charge_id] = (pMap[p.charge_id] || 0) + Number(p.amount);
         });
         setPaymentsMap(pMap);
@@ -134,83 +131,6 @@ export function CobrosModule() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleCreateCharge = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentOrg || !chargeDescription.trim() || !chargeAmount) return;
-    if (registerPaymentNow && (!initialPaymentAmount || !initialPaymentDate)) {
-      toast.error('Ingresa el monto y la fecha del pago, o desmarca "Registrar pago ahora".');
-      return;
-    }
-
-    setIsSubmittingCharge(true);
-    try {
-      const { data: newCharge, error } = await supabase
-        .from('charges')
-        .insert({
-          organization_id: currentOrg.id,
-          beneficiary_id: selectedBenId || null,
-          description: chargeDescription.trim(),
-          amount: Number(chargeAmount),
-          due_date: chargeDueDate || null,
-          period_label: periodLabel.trim() || null,
-          notes: chargeNotes.trim() || null,
-          status: 'pending',
-        })
-        .select('id')
-        .single();
-      if (error) throw error;
-
-      if (registerPaymentNow && newCharge && initialPaymentAmount) {
-        const { error: payErr } = await supabase.from('internal_payments').insert({
-          organization_id: currentOrg.id,
-          charge_id: newCharge.id,
-          amount: Math.min(Number(initialPaymentAmount), Number(chargeAmount)),
-          payment_date: initialPaymentDate,
-          method: initialPaymentMethod,
-          reference: null,
-        });
-        if (payErr) throw payErr;
-      }
-
-      toast.success(registerPaymentNow ? 'Cargo y pago registrados exitosamente.' : 'Cargo creado exitosamente.');
-      setIsChargeModalOpen(false);
-      resetChargeForm();
-      loadData();
-    } catch (err: any) {
-      toast.error('Error creando cargo: ' + err.message);
-    } finally {
-      setIsSubmittingCharge(false);
-    }
-  };
-
-  const handleVoidCharge = async (chargeId: string) => {
-    try {
-      const { error } = await supabase
-        .from('charges')
-        .update({ status: 'void' })
-        .eq('id', chargeId);
-
-      if (error) throw error;
-      toast.success('Cargo anulado.');
-      loadData();
-    } catch (err: any) {
-      toast.error('Error al anular cargo: ' + err.message);
-    }
-  };
-
-  const resetChargeForm = () => {
-    setSelectedBenId('');
-    setChargeDescription('');
-    setChargeAmount('');
-    setChargeDueDate('');
-    setPeriodLabel('');
-    setChargeNotes('');
-    setRegisterPaymentNow(false);
-    setInitialPaymentAmount('');
-    setInitialPaymentMethod('cash');
-    setInitialPaymentDate(new Date().toISOString().split('T')[0]);
   };
 
   const openPaymentModal = (charge: Charge) => {
@@ -224,13 +144,18 @@ export function CobrosModule() {
     const desc = c.description.toLowerCase();
     const search = searchTerm.toLowerCase();
     const matchesSearch = benName.includes(search) || desc.includes(search);
-    const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesStatus =
+      statusFilter === 'all' || (statusFilter === 'pending' ? isPendingLike(c.status) : c.status === statusFilter);
+    const matchesBeneficiary = beneficiaryFilter === 'all' || c.beneficiary_id === beneficiaryFilter;
+    const chargeDate = c.created_at.slice(0, 10);
+    const matchesFrom = !dateFrom || chargeDate >= dateFrom;
+    const matchesTo = !dateTo || chargeDate <= dateTo;
+    return matchesSearch && matchesStatus && matchesBeneficiary && matchesFrom && matchesTo;
   });
 
   // Calculate totals
   const totalPending = charges
-    .filter((c) => c.status === 'pending' || c.status === 'partial')
+    .filter((c) => isPendingLike(c.status))
     .reduce((acc, c) => {
       const paid = paymentsMap[c.id] || 0;
       return acc + (c.amount - paid);
@@ -239,16 +164,10 @@ export function CobrosModule() {
   const totalCollected = Object.values(paymentsMap).reduce((acc, val) => acc + val, 0);
 
   const statusBadge = (status: string) => {
-    if (status === 'pending')
+    if (isPendingLike(status))
       return (
         <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">
           <Clock className="w-3 h-3" /> Pendiente
-        </span>
-      );
-    if (status === 'partial')
-      return (
-        <span className="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">
-          <Clock className="w-3 h-3" /> Parcial
         </span>
       );
     if (status === 'paid')
@@ -274,18 +193,7 @@ export function CobrosModule() {
             Gestiona la facturación, registro de pagos y el catálogo de servicios.
           </p>
         </div>
-        {activeTab === 'cobros' ? (
-          <button
-            onClick={() => {
-              resetChargeForm();
-              setIsChargeModalOpen(true);
-            }}
-            className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Nuevo Cargo
-          </button>
-        ) : (
+        {activeTab === 'servicios' && (
           <button
             onClick={() => setIsServiceModalOpen(true)}
             className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer"
@@ -345,8 +253,8 @@ export function CobrosModule() {
       </div>
 
       {/* Toolbar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="relative w-full sm:w-80">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row flex-wrap justify-between items-center gap-3">
+        <div className="relative w-full sm:w-64">
           <input
             type="text"
             value={searchTerm}
@@ -358,16 +266,56 @@ export function CobrosModule() {
         </div>
 
         <select
+          value={beneficiaryFilter}
+          onChange={(e) => setBeneficiaryFilter(e.target.value)}
+          className="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="all">Todos los beneficiarios</option>
+          {beneficiaries.map((b) => (
+            <option key={b.id} value={b.id}>{b.first_name} {b.last_name}</option>
+          ))}
+        </select>
+
+        <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
           <option value="all">Todos los estados</option>
           <option value="pending">Pendientes</option>
-          <option value="partial">Parciales</option>
           <option value="paid">Pagados</option>
           <option value="void">Anulados</option>
         </select>
+
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-slate-500">Desde</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            max={dateTo || undefined}
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-slate-500">Hasta</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            min={dateFrom || undefined}
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        {(dateFrom || dateTo) && (
+          <button
+            type="button"
+            onClick={() => { setDateFrom(''); setDateTo(''); }}
+            className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+          >
+            Quitar fechas
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -377,8 +325,8 @@ export function CobrosModule() {
         ) : filteredCharges.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
             <Receipt className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="font-semibold text-slate-700">No hay cargos registrados</p>
-            <p className="text-xs text-slate-400 mt-1">Crea un nuevo cargo para registrar pensiones o servicios.</p>
+            <p className="font-semibold text-slate-700">No hay cargos que coincidan</p>
+            <p className="text-xs text-slate-400 mt-1">Los cargos se generan automáticamente desde Matrícula.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -435,15 +383,6 @@ export function CobrosModule() {
                               Registrar Pago
                             </button>
                           )}
-                          {charge.status !== 'void' && charge.status !== 'paid' && (
-                            <button
-                              onClick={() => handleVoidCharge(charge.id)}
-                              className="text-slate-400 hover:text-red-600 px-2 py-1.5 rounded-lg hover:bg-slate-100 text-xs transition-colors"
-                              title="Anular cargo"
-                            >
-                              Anular
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -460,150 +399,6 @@ export function CobrosModule() {
       {activeTab === 'servicios' && (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
           <ServiciosList isModalOpen={isServiceModalOpen} setIsModalOpen={setIsServiceModalOpen} />
-        </div>
-      )}
-
-      {/* Modal Crear Cargo */}
-      {isChargeModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
-              <h3 className="text-lg font-bold text-slate-900">Nuevo Cargo</h3>
-              <button onClick={() => setIsChargeModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateCharge} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Beneficiario</label>
-                <select
-                  value={selectedBenId}
-                  onChange={(e) => setSelectedBenId(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">Selecciona beneficiario (opcional)</option>
-                  {beneficiaries.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.first_name} {b.last_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Concepto / Descripción *</label>
-                <input
-                  type="text"
-                  value={chargeDescription}
-                  onChange={(e) => setChargeDescription(e.target.value)}
-                  required
-                  placeholder="Ej. Mensualidad Guardería Agosto 2026 / Paquete Tareas Dirigidas"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Monto (USD) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={chargeAmount}
-                    onChange={(e) => setChargeAmount(Number(e.target.value))}
-                    required
-                    placeholder="150.00"
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Vencimiento</label>
-                  <input
-                    type="date"
-                    value={chargeDueDate}
-                    onChange={(e) => setChargeDueDate(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Etiqueta de Periodo</label>
-                <input
-                  type="text"
-                  value={periodLabel}
-                  onChange={(e) => setPeriodLabel(e.target.value)}
-                  placeholder="Ej. Agosto 2026"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-3">
-                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={registerPaymentNow}
-                    onChange={(e) => setRegisterPaymentNow(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-emerald-500"
-                  />
-                  Ya recibí un pago por este cargo — registrarlo ahora
-                </label>
-                {registerPaymentNow && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Monto *</label>
-                      <input
-                        type="number" step="0.01" min="0.01" max={chargeAmount || undefined}
-                        value={initialPaymentAmount}
-                        onChange={(e) => setInitialPaymentAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Método</label>
-                      <select
-                        value={initialPaymentMethod}
-                        onChange={(e) => setInitialPaymentMethod(e.target.value)}
-                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      >
-                        <option value="cash">Efectivo</option>
-                        <option value="transfer">Transferencia</option>
-                        <option value="card">Tarjeta</option>
-                        <option value="other">Otro</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Fecha *</label>
-                      <input
-                        type="date"
-                        value={initialPaymentDate}
-                        onChange={(e) => setInitialPaymentDate(e.target.value)}
-                        max={new Date().toISOString().split('T')[0]}
-                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsChargeModalOpen(false)}
-                  className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingCharge}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
-                >
-                  {isSubmittingCharge ? 'Creando...' : 'Crear Cargo'}
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
 
@@ -627,6 +422,7 @@ export function CobrosModule() {
           charge={selectedChargeDetails}
           payments={selectedChargeDetails ? internalPayments.filter(p => p.charge_id === selectedChargeDetails.id) : []}
           onPayRemaining={openPaymentModal}
+          onInvoiceChanged={loadData}
           organization={currentOrg}
           beneficiaryId={selectedChargeDetails?.beneficiary_id || ''}
           beneficiaryName={

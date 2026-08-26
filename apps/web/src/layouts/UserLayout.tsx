@@ -15,7 +15,7 @@ type NavItem = {
   icon: React.ReactNode;
 };
 
-const NAV_ITEMS: NavItem[] = [
+const BASE_NAV_ITEMS: NavItem[] = [
   {
     to: '/app',
     label: 'Dashboard',
@@ -81,6 +81,24 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
 ];
+
+const FACTURAS_NAV_ITEM: NavItem = {
+  to: '/app/facturas',
+  label: 'Facturas',
+  icon: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  ),
+};
+
+function buildNavItems(hasElectronicBilling: boolean): NavItem[] {
+  if (!hasElectronicBilling) return BASE_NAV_ITEMS;
+  const cobrosIndex = BASE_NAV_ITEMS.findIndex((item) => item.to === '/app/cobros');
+  const items = [...BASE_NAV_ITEMS];
+  items.splice(cobrosIndex + 1, 0, FACTURAS_NAV_ITEM);
+  return items;
+}
 
 // Fast, styled replacement for the native `title` tooltip — the browser
 // default has a near-1s delay and can't be themed. Rendered through a
@@ -246,7 +264,8 @@ function SelectOrganizationScreen({
 
 function LayoutContent() {
   const { user, signOut } = useAuth();
-  const { currentOrg, organizations, isLoading, setCurrentOrg, isActive, refreshOrgs } = useOrg();
+  const { currentOrg, organizations, isLoading, setCurrentOrg, isActive, refreshOrgs, hasElectronicBilling } = useOrg();
+  const navItems = buildNavItems(hasElectronicBilling);
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -360,7 +379,7 @@ function LayoutContent() {
 
       {/* Navigation */}
       <nav className={`flex-1 overflow-y-auto overflow-x-hidden py-4 space-y-1 ${collapsed ? 'px-2' : 'px-4'}`}>
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           collapsed ? (
             <CollapsedNavLink key={item.to} item={item} onClick={onNavClick} />
           ) : (

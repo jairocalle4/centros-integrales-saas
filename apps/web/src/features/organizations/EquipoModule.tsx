@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { Users, UserPlus, CheckCircle } from 'lucide-react';
+import { Users, UserPlus, CheckCircle, Loader2 } from 'lucide-react';
 import { Skeleton } from '../../components/ui/Skeleton';
 
 type Member = {
@@ -199,8 +199,9 @@ export function EquipoModule() {
               <button
                 type="submit"
                 disabled={isInvitingSubmitting}
-                className="w-full sm:w-auto inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 disabled:opacity-50 transition-colors whitespace-nowrap"
               >
+                {isInvitingSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 {isInvitingSubmitting ? 'Enviando...' : 'Enviar Invitación'}
               </button>
             </form>

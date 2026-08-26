@@ -13,6 +13,7 @@ import {
   Trash2,
   GraduationCap,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ActaCompromisoModal } from './ActaCompromisoModal';
@@ -173,29 +174,11 @@ export function MatriculaWizard() {
           setBenMode('search');
         }
 
-        const { data: repLink } = await supabase
-          .from('beneficiary_representatives')
-          .select('representatives(*)')
-          .eq('beneficiary_id', benId)
-          .limit(1)
-          .maybeSingle();
-        const rep: any = (repLink as any)?.representatives;
-        if (rep) {
-          setRepresentative({
-            id: rep.id,
-            cedula: rep.identification || '',
-            first_name: rep.first_name,
-            last_name: rep.last_name,
-            email: rep.email || '',
-            phone: rep.phone || '',
-            relationship: rep.relationship || 'Madre',
-          });
-          setRepMode('search');
-        }
+        const hasRep = await prefillRepresentativeFor(benId);
 
         if (ben) {
           toast.success(`Matriculando a ${ben.first_name} ${ben.last_name}.`);
-          setCurrentStep(rep ? 3 : 2);
+          setCurrentStep(hasRep ? 3 : 2);
         }
       })();
       return;
@@ -269,6 +252,37 @@ export function MatriculaWizard() {
     }
     const { data } = await q.limit(5);
     return data || [];
+  };
+
+  // Un beneficiario existente casi siempre ya tiene representante(s)
+  // vinculados — precargar el principal evita que el usuario tenga que
+  // volver a buscarlo manualmente en el Paso 2. El campo queda editable:
+  // esto solo fija un valor por defecto, nunca bloquea el paso.
+  const prefillRepresentativeFor = async (benId: string): Promise<boolean> => {
+    const { data: repLink } = await supabase
+      .from('beneficiary_representatives')
+      .select('representatives(*)')
+      .eq('beneficiary_id', benId)
+      .order('is_primary', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const rep: any = (repLink as any)?.representatives;
+    if (rep) {
+      setRepresentative({
+        id: rep.id,
+        cedula: rep.identification || '',
+        first_name: rep.first_name,
+        last_name: rep.last_name,
+        email: rep.email || '',
+        phone: rep.phone || '',
+        relationship: rep.relationship || 'Madre',
+      });
+      setRepMode('search');
+      return true;
+    }
+    setRepresentative({ cedula: '', first_name: '', last_name: '', email: '', phone: '', relationship: 'Madre' });
+    setRepMode('search');
+    return false;
   };
 
   // Create a catalog service on the spot, without leaving the wizard — for
@@ -416,6 +430,31 @@ export function MatriculaWizard() {
 
   const handleSubmit = async () => {
     if (!currentOrg) return;
+
+    // Aviso (no bloqueo) si el beneficiario ya tiene una inscripción
+    // ACTIVA con alguno de los mismos servicios — evita el caso real de
+    // crear sin querer una segunda inscripción duplicada del mismo
+    // servicio en vez de, por ejemplo, editar la existente.
+    if (beneficiary.id && enrollmentServices.length > 0) {
+      const { data: activeRows } = await (supabase as any)
+        .from('enrollment_services')
+        .select('service_id, services ( name ), enrollments!inner ( status, beneficiary_id )')
+        .eq('enrollments.beneficiary_id', beneficiary.id)
+        .eq('enrollments.status', 'active')
+        .eq('status', 'active');
+      const activeServiceIds = new Set((activeRows ?? []).map((r: any) => r.service_id));
+      const duplicates = enrollmentServices
+        .filter(s => activeServiceIds.has(s.service_id))
+        .map(s => s.service_name);
+      if (duplicates.length > 0) {
+        const proceed = window.confirm(
+          `${beneficiary.first_name || 'Este beneficiario'} ya tiene una inscripción ACTIVA con: ${[...new Set(duplicates)].join(', ')}.\n\n` +
+          `Si continúas, quedarán dos inscripciones activas del mismo servicio (por ejemplo, con horarios distintos). ¿Deseas continuar de todas formas?`
+        );
+        if (!proceed) return;
+      }
+    }
+
     setLoading(true);
 
     try {
@@ -771,8 +810,13 @@ export function MatriculaWizard() {
                           consultation_reason: item.consultation_reason || '',
                           photo_consent: item.photo_consent ?? true,
                         });
+                        // Precarga el representante ya vinculado a este beneficiario
+                        // en el Paso 2 — el usuario sigue libre de buscar otro o
+                        // crear uno nuevo, esto solo evita repetir la búsqueda.
+                        void prefillRepresentativeFor(item.id);
                       } else {
                         setBeneficiary({ first_name: '', last_name: '', birth_date: '', consultation_reason: '', photo_consent: true });
+                        setRepresentative({ cedula: '', first_name: '', last_name: '', email: '', phone: '', relationship: 'Madre' });
                       }
                     }}
                     renderItem={(b) => (
@@ -1024,8 +1068,9 @@ export function MatriculaWizard() {
                         type="button"
                         onClick={handleCreateQuickService}
                         disabled={creatingQuickService}
-                        className="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
                       >
+                        {creatingQuickService && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                         {creatingQuickService ? 'Creando...' : 'Crear y usar'}
                       </button>
                     </div>
@@ -1372,7 +1417,7 @@ export function MatriculaWizard() {
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition shadow-md disabled:opacity-50"
               >
                 {loading ? 'Guardando...' : 'Completar Matrícula'}
-                <Save className="w-4 h-4" />
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               </button>
             )}
           </div>

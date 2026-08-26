@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useOrg } from './OrgContext';
 import toast from 'react-hot-toast';
-import { X, PackageOpen, Tag } from 'lucide-react';
+import { X, PackageOpen, Tag, Loader2 } from 'lucide-react';
 import { SkeletonTable } from '../../components/ui/Skeleton';
 
 type Service = {
@@ -252,8 +252,9 @@ export function ServiciosList({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
                 >
+                  {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   {isSubmitting ? 'Guardando...' : editingServiceId ? 'Actualizar Servicio' : 'Crear Servicio'}
                 </button>
               </div>

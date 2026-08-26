@@ -460,7 +460,6 @@ export function FinancialDashboard() {
         { status: 'justified', count: attCounts['justified'] || 0, color: '#6366f1', label: 'Justificadas' },
         { status: 'absent', count: attCounts['absent'] || 0, color: '#f43f5e', label: 'Ausentes' },
       ].filter((s) => s.count > 0);
-      const attTotal = attendanceStats.reduce((s, a) => s + a.count, 0);
 
       // ─── Conversion KPIs ─────────────────────────────────────────────────
       const allAppts = appointmentsRes.data || [];

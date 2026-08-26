@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
@@ -26,6 +26,9 @@ import {
   Upload,
   GraduationCap,
   CalendarCheck,
+  Mic,
+  MicOff,
+  Loader2,
 } from 'lucide-react';
 import { ActaCompromisoModal } from './ActaCompromisoModal';
 import type { CommitmentData } from './ActaCompromisoModal';
@@ -159,13 +162,31 @@ function statusLabel(status: string) {
 }
 
 function chargeStatusColor(status: string) {
+  // "Pendiente" y "Parcial" comparten el mismo badge — desde el cargo,
+  // ambos significan "todavía se debe algo" (ver CobrosModule.tsx).
   return status === 'paid' ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-    : status === 'partial' ? 'text-amber-700 bg-amber-50 border-amber-200'
-    : 'text-red-700 bg-red-50 border-red-200';
+    : status === 'void' ? 'text-slate-600 bg-slate-100 border-slate-200'
+    : 'text-amber-700 bg-amber-50 border-amber-200';
 }
 
 function chargeStatusLabel(status: string) {
-  return status === 'paid' ? 'Pagado' : status === 'partial' ? 'Parcial' : 'Pendiente';
+  return status === 'paid' ? 'Pagado' : status === 'void' ? 'Anulado' : 'Pendiente';
+}
+
+// Cuando el mismo beneficiario tiene dos inscripciones activas del mismo
+// servicio (ej. "Nivelación Académica" con dos horarios distintos), el
+// nombre solo ya no alcanza para distinguirlas en el dropdown de notas de
+// sesión — se agrega el horario para desambiguar.
+function describeEnrollmentService(svc: EnrollmentServiceRow, allServices: EnrollmentServiceRow[]): string {
+  const isAmbiguous = allServices.filter(s => s.service_name === svc.service_name).length > 1;
+  if (!isAmbiguous) return svc.service_name;
+  if (svc.schedules && svc.schedules.length > 0) {
+    const dayLabels = svc.schedules
+      .map(s => DAYS.find(d => d.value === s.day_of_week)?.label.slice(0, 3) ?? '')
+      .join('/');
+    return `${svc.service_name} (${dayLabels} ${svc.schedules[0].start_time})`;
+  }
+  return `${svc.service_name} (sin horario asignado)`;
 }
 
 // ─── Session Note Form ─────────────────────────────────────────────────────────
@@ -176,17 +197,67 @@ interface NoteFormProps {
   enrollmentServices: EnrollmentServiceRow[];
   onClose: () => void;
   onSuccess: () => void;
+  initialDate?: string;
+  initialServiceId?: string;
 }
 
-function NoteForm({ beneficiaryId, organizationId, enrollmentServices, onClose, onSuccess }: NoteFormProps) {
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [serviceId, setServiceId] = useState(enrollmentServices[0]?.id || '');
+// ─── Dictado por voz (Web Speech API, nativo del navegador) ────────────────
+// Sin costo ni backend — funciona bien en Chrome/Edge de escritorio y
+// Android; Safari/iOS tiene soporte parcial. Si el navegador no lo soporta,
+// el botón simplemente avisa en vez de fallar en silencio.
+function useSpeechDictation(onFinalText: (text: string) => void) {
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const supported = typeof window !== 'undefined' && Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
+  const toggle = () => {
+    if (!supported) {
+      toast.error('El dictado por voz no está disponible en este navegador — funciona en Chrome o Edge.');
+      return;
+    }
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'es-EC';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.onresult = (event: any) => {
+      let finalText = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
+      }
+      if (finalText.trim()) onFinalText(finalText.trim());
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      toast.error('No se pudo continuar con el dictado por voz.');
+    };
+    recognition.onend = () => setIsListening(false);
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
+  };
+
+  useEffect(() => () => { recognitionRef.current?.stop(); }, []);
+
+  return { isListening, toggle, supported };
+}
+
+function NoteForm({ beneficiaryId, organizationId, enrollmentServices, onClose, onSuccess, initialDate, initialServiceId }: NoteFormProps) {
+  const [date, setDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
+  const [serviceId, setServiceId] = useState(initialServiceId || enrollmentServices[0]?.id || '');
   const [therapistName, setTherapistName] = useState('');
   const [observations, setObservations] = useState('');
   const [goals, setGoals] = useState('');
   const [nextSteps, setNextSteps] = useState('');
   const [rating, setRating] = useState<number>(3);
   const [submitting, setSubmitting] = useState(false);
+  const dictation = useSpeechDictation((text) => {
+    setObservations(prev => (prev ? `${prev} ${text}` : text));
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,7 +309,7 @@ function NoteForm({ beneficiaryId, organizationId, enrollmentServices, onClose, 
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
                 <option value="">-- Sin vincular --</option>
                 {enrollmentServices.map(s => (
-                  <option key={s.id} value={s.id}>{s.service_name}</option>
+                  <option key={s.id} value={s.id}>{describeEnrollmentService(s, enrollmentServices)}</option>
                 ))}
               </select>
             </div>
@@ -252,7 +323,22 @@ function NoteForm({ beneficiaryId, organizationId, enrollmentServices, onClose, 
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Observaciones de la Sesión <span className="text-red-500">*</span></label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-slate-700">Observaciones de la Sesión <span className="text-red-500">*</span></label>
+              <button
+                type="button"
+                onClick={dictation.toggle}
+                title={dictation.supported ? 'Dictar por voz' : 'Dictado por voz no disponible en este navegador'}
+                className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border transition-colors ${
+                  dictation.isListening
+                    ? 'bg-red-50 text-red-700 border-red-200 animate-pulse'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                }`}
+              >
+                {dictation.isListening ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                {dictation.isListening ? 'Escuchando…' : 'Dictar'}
+              </button>
+            </div>
             <textarea value={observations} onChange={(e) => setObservations(e.target.value)}
               placeholder="¿Qué se trabajó hoy? ¿Cómo respondió el paciente?"
               rows={3}
@@ -293,7 +379,8 @@ function NoteForm({ beneficiaryId, organizationId, enrollmentServices, onClose, 
           <div className="flex gap-3 pt-2 border-t border-slate-100">
             <button type="button" onClick={onClose} className="flex-1 py-2.5 text-sm font-bold text-slate-600 border border-slate-300 rounded-xl hover:bg-slate-50">Cancelar</button>
             <button type="submit" disabled={submitting}
-              className="flex-1 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition disabled:opacity-50">
+              className="flex-1 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition disabled:opacity-50 inline-flex items-center justify-center gap-2">
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
               {submitting ? 'Guardando...' : 'Guardar Nota'}
             </button>
           </div>
@@ -426,8 +513,9 @@ function LinkRepresentativeModal({
                     type="button"
                     disabled={!selected || saving}
                     onClick={() => selected && onSelectExisting(selected.id)}
-                    className="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 cursor-pointer"
+                    className="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 cursor-pointer inline-flex items-center gap-2"
                   >
+                    {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                     {saving ? 'Vinculando...' : 'Vincular'}
                   </button>
                 </div>
@@ -479,7 +567,8 @@ function LinkRepresentativeModal({
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={creating || saving} className="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 cursor-pointer">
+                <button type="submit" disabled={creating || saving} className="px-5 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 cursor-pointer inline-flex items-center gap-2">
+                  {(creating || saving) && <Loader2 className="w-4 h-4 animate-spin" />}
                   {creating || saving ? 'Guardando...' : 'Crear y Vincular'}
                 </button>
               </div>
@@ -496,10 +585,13 @@ function LinkRepresentativeModal({
 export function BeneficiaryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentOrg, hasElectronicBilling, hasSriCertificate } = useOrg();
   const canEmitInvoices = hasElectronicBilling && hasSriCertificate;
-  const [activeTab, setActiveTab] = useState<Tab>('resumen');
+  const initialTab = (searchParams.get('tab') as Tab) || 'resumen';
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [loading, setLoading] = useState(true);
+  const [noteFormPrefill, setNoteFormPrefill] = useState<{ date?: string; serviceId?: string }>({});
 
   const [beneficiary, setBeneficiary] = useState<Beneficiary | null>(null);
   const [representatives, setRepresentatives] = useState<Representative[]>([]);
@@ -523,7 +615,9 @@ export function BeneficiaryDetailPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
 
   // All enrollment services across all active enrollments
-  const allEnrollmentServices = enrollments.flatMap(e => e.services);
+  // Solo inscripciones activas — no tiene sentido registrar una nota de
+  // sesión nueva contra una inscripción ya completada/suspendida.
+  const allEnrollmentServices = enrollments.filter(e => e.status === 'active').flatMap(e => e.services);
 
   // ─── Data Loading ────────────────────────────────────────────────────────────
 
@@ -599,14 +693,16 @@ export function BeneficiaryDetailPage() {
       // Charges with their full payment history
       const { data: chargesData } = await supabase
         .from('charges')
-        .select('*, internal_payments(*)')
+        .select('*, internal_payments(*, sri_documents ( status, pdf_url, cliente_email, email_sent_at ))')
         .eq('beneficiary_id', id)
         .order('created_at', { ascending: false });
 
       setCharges((chargesData || []).map((c: any) => ({
         ...c,
         payments: c.internal_payments || [],
-        paid_amount: (c.internal_payments || []).reduce((sum: number, p: any) => sum + (p.amount || 0), 0),
+        paid_amount: (c.internal_payments || [])
+          .filter((p: any) => !p.voided_at)
+          .reduce((sum: number, p: any) => sum + (p.amount || 0), 0),
       })));
 
       // Attendance history — the audit trail behind this beneficiary's
@@ -642,6 +738,27 @@ export function BeneficiaryDetailPage() {
   }, [id, currentOrg, navigate]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Viniendo desde Asistencia (marcar Presente/Tarde → "Registrar Avance"):
+  // resuelve el servicio del CATÁLOGO (attendance.service_id) contra la
+  // inscripción activa real de este beneficiario (enrollment_services.id,
+  // que es lo que NoteForm/session_notes realmente usan) y abre el
+  // formulario ya con la fecha y el servicio correctos — sin que el
+  // usuario tenga que volver a elegirlos a mano.
+  useEffect(() => {
+    if (searchParams.get('openNote') !== '1' || enrollments.length === 0) return;
+    const catalogServiceId = searchParams.get('catalogServiceId');
+    const noteDate = searchParams.get('noteDate') ?? undefined;
+    const activeServices = enrollments.filter(e => e.status === 'active').flatMap(e => e.services);
+    const matched = catalogServiceId ? activeServices.find(s => s.service_id === catalogServiceId) : undefined;
+    setNoteFormPrefill({ date: noteDate, serviceId: matched?.id });
+    setShowNoteForm(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('openNote');
+    next.delete('catalogServiceId');
+    next.delete('noteDate');
+    setSearchParams(next, { replace: true });
+  }, [enrollments, searchParams, setSearchParams]);
 
   // The beneficiary-photos bucket is private (RLS-gated by organization
   // membership); `photo_url` stores the storage path, not a public URL, so
@@ -1416,7 +1533,9 @@ export function BeneficiaryDetailPage() {
           beneficiaryId={beneficiary.id}
           organizationId={currentOrg.id}
           enrollmentServices={allEnrollmentServices}
-          onClose={() => setShowNoteForm(false)}
+          initialDate={noteFormPrefill.date}
+          initialServiceId={noteFormPrefill.serviceId}
+          onClose={() => { setShowNoteForm(false); setNoteFormPrefill({}); }}
           onSuccess={loadAll}
         />
       )}
@@ -1450,6 +1569,7 @@ export function BeneficiaryDetailPage() {
           charge={viewingCharge}
           payments={viewingCharge?.payments || []}
           onPayRemaining={(c) => setPaymentTarget(c)}
+          onInvoiceChanged={loadAll}
           organization={currentOrg}
           beneficiaryId={beneficiary.id}
           beneficiaryName={`${beneficiary.first_name} ${beneficiary.last_name}`}

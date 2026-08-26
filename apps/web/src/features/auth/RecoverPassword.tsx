@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { supabase } from '../../lib/supabase';
 import { Link } from 'react-router';
+import { Loader2 } from 'lucide-react';
 
 const recoverSchema = z.object({
   email: z.string().email('Por favor ingresa un correo electrónico válido'),
@@ -96,8 +97,9 @@ export function RecoverPassword() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-indigo-400 disabled:cursor-not-allowed"
+                  className="flex w-full justify-center items-center gap-2 rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-indigo-400 disabled:cursor-not-allowed"
                 >
+                  {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   {isSubmitting ? 'Enviando enlace...' : 'Enviar enlace de recuperación'}
                 </button>
               </div>

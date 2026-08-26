@@ -1,4 +1,4 @@
-import { StrictMode, lazy, Suspense } from 'react';
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -24,18 +24,13 @@ import { BeneficiariosModule } from './features/organizations/BeneficiariosModul
 import { RepresentantesModule } from './features/organizations/RepresentantesModule';
 import { AsistenciaModule } from './features/organizations/AsistenciaModule';
 import { CobrosModule } from './features/organizations/CobrosModule';
+import { FacturasModule } from './features/organizations/FacturasModule';
 import { EquipoModule } from './features/organizations/EquipoModule';
 import { ConfiguracionModule } from './features/organizations/ConfiguracionModule';
 import { BeneficiaryDetailPage } from './features/organizations/BeneficiaryDetailPage';
 import { FinancialDashboard } from './features/organizations/FinancialDashboard';
 
 const queryClient = new QueryClient();
-
-const PageLoader = () => (
-  <div className="flex items-center justify-center h-48 text-slate-400 text-sm animate-pulse">
-    Cargando módulo...
-  </div>
-);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -82,6 +77,10 @@ createRoot(document.getElementById('root')!).render(
                 <Route
                   path="cobros"
                   element={<CobrosModule />}
+                />
+                <Route
+                  path="facturas"
+                  element={<FacturasModule />}
                 />
                 <Route
                   path="equipo"

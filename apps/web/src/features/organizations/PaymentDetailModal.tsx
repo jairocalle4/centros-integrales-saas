@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { X, Receipt, Plus, Calendar, DollarSign, CreditCard, Download, Send, Loader2 } from 'lucide-react';
+import { X, Receipt, Plus, Calendar, DollarSign, CreditCard, Download, Send, Loader2, FileCheck, RotateCcw, FileX, Mail, Ban } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
@@ -16,7 +16,138 @@ export type Payment = {
   method: string;
   reference: string | null;
   notes?: string | null;
+  sri_document_id?: string | null;
+  sri_documents?: { status: string; pdf_url: string | null; cliente_email: string | null; email_sent_at: string | null } | null;
+  voided_at?: string | null;
+  voided_reason?: string | null;
 };
+
+// ─── Anular un pago individual (no el cargo completo) ──────────────────────
+// Soft-delete: nunca se borra la fila, solo se marca voided_at — preserva
+// el historial (mismo principio del dominio ya aplicado a beneficiarios y
+// miembros). El trigger prevent_void_payment_with_authorized_invoice
+// (migración 20260824110000) bloquea del lado de la base de datos anular
+// un pago con una factura ya AUTORIZADA — este chequeo del lado del
+// cliente es solo para dar feedback inmediato, no la única protección.
+
+export async function voidPayment(paymentId: string, reason?: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('internal_payments')
+    .update({ voided_at: new Date().toISOString(), voided_reason: reason?.trim() || null })
+    .eq('id', paymentId);
+  if (error) {
+    toast.error('No se pudo anular el pago: ' + error.message, { duration: 6000 });
+    return false;
+  }
+  toast.success('Pago anulado.');
+  return true;
+}
+
+// ─── Factura electrónica: badge + "Ver factura" / "Reintentar" / correo ───
+// Compartido entre el historial de pagos de este modal y el módulo de
+// Facturas — un pago solo tiene esto si alguna vez se intentó facturar
+// (sri_document_id no nulo), sea que haya quedado autorizada o rechazada.
+
+export function InvoiceStatusBadge({ status }: { status: string }) {
+  if (status === 'AUTHORIZED') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200">
+        <FileCheck className="w-3 h-3" /> Facturada
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-red-700 bg-red-50 border border-red-200">
+      <FileX className="w-3 h-3" /> Rechazada por el SRI
+    </span>
+  );
+}
+
+export async function openInvoicePdf(pdfUrl: string) {
+  const { data, error } = await supabase.storage.from('sri-documents').createSignedUrl(pdfUrl, 120);
+  if (error || !data) {
+    toast.error('No se pudo abrir la factura: ' + (error?.message || 'error desconocido'));
+    return;
+  }
+  window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+}
+
+// supabase.functions.invoke() solo llena `data` en una respuesta 2xx — en
+// una respuesta no-2xx, error.message es un texto genérico y el cuerpo
+// real { error: "...", sri_document_id?: "..." } hay que leerlo de
+// error.context en su lugar. parseEdgeFunctionErrorBody devuelve el
+// cuerpo completo (no solo el mensaje) — RegisterPaymentModal lo necesita
+// para decidir si hubo o no un sri_document_id (ver más abajo).
+export async function parseEdgeFunctionErrorBody(data: any, error: any): Promise<any> {
+  if (data && typeof data === 'object') return data;
+  if (error?.context) {
+    try {
+      const body = await error.context.text();
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch { /* keep falling through to the generic message */ }
+  }
+  return { error: error?.message || 'Error desconocido.' };
+}
+
+// Compartido por retryInvoice/resendInvoiceEmail y por
+// InvoiceEnrollmentModal, para no duplicar este desempaquetado.
+export async function extractEdgeFunctionError(data: any, error: any): Promise<string> {
+  const parsed = await parseEdgeFunctionErrorBody(data, error);
+  return parsed?.error || 'Error desconocido.';
+}
+
+// email_status viene de handleEmit/handleRetry — distingue si la factura
+// se envió por correo, y si no, por qué (para poder decírselo al usuario
+// en vez de un silencio).
+export function describeEmailStatus(emailStatus?: string): { message: string; tone: 'success' | 'info' | 'error' } | null {
+  switch (emailStatus) {
+    case 'sent':
+      return { message: 'Factura enviada por correo al cliente.', tone: 'success' };
+    case 'no_email':
+      return { message: 'No se envió por correo: el representante no tiene un email registrado.', tone: 'info' };
+    case 'not_configured':
+      return { message: 'No se envió por correo: el envío de facturas no está configurado todavía (Configuración de Plataforma).', tone: 'info' };
+    case 'failed':
+      return { message: 'No se pudo enviar la factura por correo — puedes reintentarlo desde el módulo Facturas.', tone: 'error' };
+    default:
+      return null;
+  }
+}
+
+export function showEmailStatusToast(emailStatus?: string) {
+  const info = describeEmailStatus(emailStatus);
+  if (!info) return;
+  if (info.tone === 'error') toast.error(info.message, { duration: 6000 });
+  else if (info.tone === 'success') toast.success(info.message, { duration: 4000 });
+  else toast(info.message, { duration: 5000, icon: 'ℹ️' });
+}
+
+export async function retryInvoice(organizationId: string, sriDocumentId: string): Promise<boolean> {
+  const { data, error } = await supabase.functions.invoke('electronic-billing', {
+    body: { action: 'retry', organization_id: organizationId, sri_document_id: sriDocumentId },
+  });
+  if (error || (data as any)?.error) {
+    const message = await extractEdgeFunctionError(data, error);
+    toast.error('No se pudo reintentar la factura: ' + message, { duration: 6000 });
+    return false;
+  }
+  toast.success('Factura autorizada por el SRI.');
+  return true;
+}
+
+export async function resendInvoiceEmail(organizationId: string, sriDocumentId: string): Promise<boolean> {
+  const { data, error } = await supabase.functions.invoke('electronic-billing', {
+    body: { action: 'resend_email', organization_id: organizationId, sri_document_id: sriDocumentId },
+  });
+  if (error || (data as any)?.error) {
+    const message = await extractEdgeFunctionError(data, error);
+    toast.error('No se pudo enviar el correo: ' + message, { duration: 6000 });
+    return false;
+  }
+  toast.success('Factura enviada por correo.');
+  return true;
+}
 
 export type PrimaryRepresentative = { id: string; name: string; phone: string | null; identification: string | null };
 
@@ -31,6 +162,36 @@ export async function fetchPrimaryRepresentative(beneficiaryId: string): Promise
   return { id: rep.id, name: `${rep.first_name} ${rep.last_name}`, phone: rep.phone, identification: rep.identification };
 }
 
+// ─── Resuelve el representante principal de un beneficiario y si tiene
+// cédula registrada — usado para bloquear la emisión de factura hasta que
+// el usuario resuelva la cédula o elija explícitamente facturar como
+// Consumidor Final. `beneficiaryId` ausente (ej. un cobro general sin
+// beneficiario vinculado) también cuenta como "sin identificación": hoy
+// ese caso ya caía en Consumidor Final siempre, y debe pasar por el mismo
+// control.
+
+export function useComprobanteComprador(beneficiaryId: string | undefined) {
+  const [representative, setRepresentative] = useState<PrimaryRepresentative | null>(null);
+  const [loading, setLoading] = useState(Boolean(beneficiaryId));
+
+  useEffect(() => {
+    if (!beneficiaryId) { setRepresentative(null); setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const rep = await fetchPrimaryRepresentative(beneficiaryId);
+        if (!cancelled) setRepresentative(rep);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [beneficiaryId]);
+
+  return { representative, loading, hasIdentification: Boolean(representative?.identification) };
+}
+
 type Props = {
   isOpen: boolean;
   onClose: () => void;
@@ -40,14 +201,51 @@ type Props = {
   organization: ReceiptOrganization & { id: string };
   beneficiaryId: string;
   beneficiaryName: string;
+  onInvoiceChanged?: () => void;
 };
 
-export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRemaining, organization, beneficiaryId, beneficiaryName }: Props) {
+export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRemaining, organization, beneficiaryId, beneficiaryName, onInvoiceChanged }: Props) {
   const navigate = useNavigate();
   const [representative, setRepresentative] = useState<PrimaryRepresentative | null>(null);
   const [loadingRep, setLoadingRep] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+
+  const handleVoidPayment = async (payment: Payment) => {
+    const confirmed = window.confirm(
+      `¿Anular este pago de $${Number(payment.amount).toFixed(2)}? El saldo pendiente del cobro se recalculará. Esta acción no se puede deshacer.`
+    );
+    if (!confirmed) return;
+    setVoidingId(payment.id);
+    try {
+      const succeeded = await voidPayment(payment.id);
+      if (succeeded) onInvoiceChanged?.();
+    } finally {
+      setVoidingId(null);
+    }
+  };
+
+  const handleRetryInvoice = async (sriDocumentId: string) => {
+    setRetryingId(sriDocumentId);
+    try {
+      const succeeded = await retryInvoice(organization.id, sriDocumentId);
+      if (succeeded) onInvoiceChanged?.();
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
+  const handleResendInvoiceEmail = async (sriDocumentId: string) => {
+    setResendingId(sriDocumentId);
+    try {
+      await resendInvoiceEmail(organization.id, sriDocumentId);
+    } finally {
+      setResendingId(null);
+    }
+  };
 
   // Hooks must run unconditionally on every render — the early return below
   // (this modal stays mounted and toggles via `isOpen`) can't come before them.
@@ -70,7 +268,7 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
 
   if (!isOpen || !charge) return null;
 
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const totalPaid = payments.filter(p => !p.voided_at).reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = Math.max(0, charge.amount - totalPaid);
 
   const getMethodLabel = (method: string) => {
@@ -83,10 +281,10 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   };
 
   const statusBadge = (status: string) => {
-    if (status === 'pending')
+    // "Pendiente" y "Parcial" se muestran igual — desde el cargo, ambos
+    // significan lo mismo: todavía se debe algo (ver CobrosModule.tsx).
+    if (status === 'pending' || status === 'partial')
       return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200">Pendiente</span>;
-    if (status === 'partial')
-      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200">Parcial</span>;
     if (status === 'paid')
       return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200">Pagado</span>;
     if (status === 'void')
@@ -97,7 +295,7 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-center gap-3">
@@ -118,7 +316,7 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
 
         {/* Body */}
         <div className="p-6 space-y-6">
-          
+
           {/* Summary Cards */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
@@ -193,14 +391,17 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                     navigate(representative ? `/app/representantes?edit=${representative.id}` : `/app/beneficiarios/${beneficiaryId}`);
                   };
 
+                  const isVoided = Boolean(payment.voided_at);
+                  const hasAuthorizedInvoice = payment.sri_document_id && payment.sri_documents?.status === 'AUTHORIZED';
+
                   return (
-                    <div key={payment.id} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white border border-slate-100 shadow-sm hover:border-slate-200 transition-colors">
+                    <div key={payment.id} className={`flex items-center justify-between gap-3 p-3 rounded-xl bg-white border shadow-sm transition-colors ${isVoided ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'}`}>
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                           <DollarSign className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-slate-900">
+                          <p className={`text-sm font-medium text-slate-900 ${isVoided ? 'line-through' : ''}`}>
                             Abono en {getMethodLabel(payment.method)}
                           </p>
                           <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -214,15 +415,62 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                               </span>
                             )}
                           </div>
+                          <div className="mt-1 flex items-center gap-1.5">
+                            {isVoided && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200">
+                                <Ban className="w-3 h-3" /> Anulado
+                              </span>
+                            )}
+                            {payment.sri_document_id && payment.sri_documents && (
+                              <InvoiceStatusBadge status={payment.sri_documents.status} />
+                            )}
+                          </div>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-3 shrink-0">
-                        <span className="font-semibold text-slate-900">
+                        <span className={`font-semibold text-slate-900 ${isVoided ? 'line-through text-slate-400' : ''}`}>
                           ${Number(payment.amount).toFixed(2)}
                         </span>
 
                         <div className="flex items-center gap-1 border-l border-slate-100 pl-3">
+                          {payment.sri_document_id && payment.sri_documents?.status === 'AUTHORIZED' && (
+                            <button
+                              onClick={() => payment.sri_documents!.pdf_url && openInvoicePdf(payment.sri_documents!.pdf_url)}
+                              disabled={!payment.sri_documents.pdf_url}
+                              title={payment.sri_documents.pdf_url ? 'Ver factura (RIDE)' : 'El RIDE aún no está disponible'}
+                              className="text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 p-1.5 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
+                            >
+                              <FileCheck className="w-4 h-4" />
+                            </button>
+                          )}
+                          {payment.sri_document_id && payment.sri_documents?.status === 'AUTHORIZED' && (
+                            payment.sri_documents.cliente_email ? (
+                              <button
+                                onClick={() => handleResendInvoiceEmail(payment.sri_document_id!)}
+                                disabled={resendingId === payment.sri_document_id}
+                                title={payment.sri_documents.email_sent_at ? 'Reenviar factura por correo' : 'Enviar factura por correo'}
+                                className="text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                {resendingId === payment.sri_document_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                              </button>
+                            ) : (
+                              <span title="Sin correo del cliente registrado — no se puede enviar" className="text-slate-300 p-1.5">
+                                <Mail className="w-4 h-4" />
+                              </span>
+                            )
+                          )}
+                          {payment.sri_document_id && payment.sri_documents && payment.sri_documents.status !== 'AUTHORIZED' && (
+                            <button
+                              onClick={() => handleRetryInvoice(payment.sri_document_id!)}
+                              disabled={retryingId === payment.sri_document_id}
+                              title="Reintentar factura electrónica"
+                              className="text-slate-500 hover:text-amber-700 hover:bg-amber-50 p-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                            >
+                              {retryingId === payment.sri_document_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                            </button>
+                          )}
+
                           <button
                             onClick={handleDownload}
                             disabled={isDownloading}
@@ -259,6 +507,17 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                               className="text-[10px] font-semibold text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
                             >
                               Sin WhatsApp
+                            </button>
+                          )}
+
+                          {!isVoided && (
+                            <button
+                              onClick={() => handleVoidPayment(payment)}
+                              disabled={voidingId === payment.id || Boolean(hasAuthorizedInvoice)}
+                              title={hasAuthorizedInvoice ? 'No se puede anular — tiene una factura autorizada por el SRI' : 'Anular este pago'}
+                              className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors disabled:opacity-30 cursor-pointer"
+                            >
+                              {voidingId === payment.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
                             </button>
                           )}
                         </div>
@@ -325,6 +584,8 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [reference, setReference] = useState('');
   const [submittingAction, setSubmittingAction] = useState<'save' | 'invoice' | null>(null);
+  const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
+  const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
 
   const validate = (): boolean => {
     if (!amount || Number(amount) <= 0) { toast.error('Ingresa un monto válido.'); return false; }
@@ -377,22 +638,31 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
       const paymentId = await insertPayment();
       if (!paymentId) return;
 
-      const representative = beneficiaryId ? await fetchPrimaryRepresentative(beneficiaryId) : null;
       const { data, error } = await supabase.functions.invoke('electronic-billing', {
         body: {
           organization_id: charge.organization_id,
           internal_payment_ids: [paymentId],
-          cliente_identificacion: representative?.identification || undefined,
+          allow_consumidor_final: allowConsumidorFinal,
         },
       });
 
       if (error || (data as any)?.error) {
-        toast.error(
-          'El pago se guardó, pero no se pudo facturar: ' + ((data as any)?.error || error?.message),
-          { duration: 6000 }
-        );
+        const parsed = await parseEdgeFunctionErrorBody(data, error);
+        const message = parsed?.error || 'Error desconocido.';
+        if (!parsed?.sri_document_id) {
+          // El intento nunca llegó a registrarse (ni siquiera rechazado
+          // por el SRI) — "Guardar y Facturar" es todo o nada: se revierte
+          // el pago recién insertado en vez de dejarlo huérfano sin factura.
+          await supabase.from('internal_payments').delete().eq('id', paymentId);
+          toast.error('No se pudo facturar — el pago NO se guardó: ' + message, { duration: 7000 });
+        } else {
+          // El SRI sí respondió (lo rechazó) y ya quedó registrado y
+          // vinculado — el pago se conserva para poder reintentar.
+          toast.error('El pago se guardó, pero el SRI rechazó la factura: ' + message, { duration: 7000 });
+        }
       } else {
-        toast.success('Pago guardado y factura electrónica emitida (simulación Sprint 0).', { duration: 4000 });
+        toast.success('Pago guardado y factura electrónica autorizada por el SRI.', { duration: 4000 });
+        showEmailStatusToast((data as any)?.email_status);
       }
       onSuccess();
       onClose();
@@ -400,6 +670,8 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
       setSubmittingAction(null);
     }
   };
+
+  const invoiceBlocked = Boolean(hasElectronicBilling) && !repLoading && !hasIdentification && !allowConsumidorFinal;
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
@@ -473,6 +745,21 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
             />
           </div>
 
+          {hasElectronicBilling && !repLoading && !hasIdentification && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-2">
+              <p>El representante no tiene cédula registrada — no se puede emitir la factura a su nombre.</p>
+              <label className="flex items-center gap-2 font-semibold cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allowConsumidorFinal}
+                  onChange={(e) => setAllowConsumidorFinal(e.target.checked)}
+                  className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                />
+                Facturar como Consumidor Final
+              </label>
+            </div>
+          )}
+
           <div className="flex flex-wrap justify-center gap-3 pt-4 border-t border-slate-100">
             <button
               type="button"
@@ -485,19 +772,20 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
             <button
               type="submit"
               disabled={submittingAction !== null}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
             >
+              {submittingAction === 'save' && <Loader2 className="w-4 h-4 animate-spin" />}
               {submittingAction === 'save' ? 'Registrando...' : 'Confirmar Pago'}
             </button>
             {hasElectronicBilling && (
               <button
                 type="button"
                 onClick={handleSaveAndInvoice}
-                disabled={submittingAction !== null}
-                title="Guarda el pago y emite de una vez la factura electrónica de este abono"
+                disabled={submittingAction !== null || repLoading || invoiceBlocked}
+                title={invoiceBlocked ? 'Falta la cédula del comprador — activa "Facturar como Consumidor Final" para continuar' : 'Guarda el pago y emite de una vez la factura electrónica de este abono'}
                 className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
               >
-                <Receipt className="w-4 h-4" />
+                {submittingAction === 'invoice' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Receipt className="w-4 h-4" />}
                 {submittingAction === 'invoice' ? 'Facturando...' : 'Guardar y Facturar'}
               </button>
             )}

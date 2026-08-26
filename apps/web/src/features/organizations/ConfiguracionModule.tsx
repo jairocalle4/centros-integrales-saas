@@ -3,7 +3,7 @@ import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import { ElectronicBillingSettings } from '../billing/ElectronicBillingSettings';
-import { Building2, Save, MapPin, Phone, Mail, FileText, ShieldCheck } from 'lucide-react';
+import { Building2, Save, MapPin, Phone, Mail, FileText, ShieldCheck, Loader2 } from 'lucide-react';
 
 export function ConfiguracionModule() {
   const { currentOrg, refreshOrgs, hasElectronicBilling } = useOrg();
@@ -105,11 +105,12 @@ export function ConfiguracionModule() {
       {/* TAB 1: General Settings */}
       {activeTab === 'general' && (
         <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-          <form onSubmit={handleSaveGeneral} className="space-y-6 max-w-3xl">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              
+          <form onSubmit={handleSaveGeneral} className="space-y-6 max-w-5xl">
+            <h3 className="text-sm font-bold text-slate-900">Información del Centro</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+
               {/* Nombre del Centro */}
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-2 xl:col-span-3">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                   Nombre Oficial del Centro Integral *
                 </label>
@@ -201,7 +202,7 @@ export function ConfiguracionModule() {
               </div>
 
               {/* Dirección Física */}
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-2 xl:col-span-2">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                   Dirección Completa de la Sede
                 </label>
@@ -222,7 +223,7 @@ export function ConfiguracionModule() {
                 disabled={saving}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-md transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <Save className="w-4 h-4" />
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 {saving ? 'Guardando...' : 'Guardar Cambios'}
               </button>
             </div>

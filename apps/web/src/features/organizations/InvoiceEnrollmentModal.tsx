@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, Receipt, FileCheck } from 'lucide-react';
+import { X, Receipt, FileCheck, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
-import { fetchPrimaryRepresentative } from './PaymentDetailModal';
+import { useComprobanteComprador, extractEdgeFunctionError, showEmailStatusToast } from './PaymentDetailModal';
 
 type PendingPayment = {
   id: string;
@@ -36,6 +36,8 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
+  const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,22 +83,24 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
     .filter(p => selectedIds.has(p.id))
     .reduce((sum, p) => sum + p.amount, 0);
 
+  const invoiceBlocked = !repLoading && !hasIdentification && !allowConsumidorFinal;
+
   const handleSubmit = async () => {
     if (selectedIds.size === 0) return;
     setSubmitting(true);
     try {
-      const representative = await fetchPrimaryRepresentative(beneficiaryId);
       const { data, error } = await supabase.functions.invoke('electronic-billing', {
         body: {
           organization_id: organizationId,
           internal_payment_ids: Array.from(selectedIds),
-          cliente_identificacion: representative?.identification || undefined,
+          allow_consumidor_final: allowConsumidorFinal,
         },
       });
       if (error || (data as any)?.error) {
-        throw new Error((data as any)?.error || error?.message);
+        throw new Error(await extractEdgeFunctionError(data, error));
       }
-      toast.success(`Factura electrónica emitida por $${total.toFixed(2)} (simulación Sprint 0).`, { duration: 4000 });
+      toast.success(`Factura electrónica por $${total.toFixed(2)} autorizada por el SRI.`, { duration: 4000 });
+      showEmailStatusToast((data as any)?.email_status);
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -159,6 +163,21 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
                   </label>
                 ))}
               </div>
+
+              {!repLoading && !hasIdentification && (
+                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-2">
+                  <p>El representante no tiene cédula registrada — no se puede emitir la factura a su nombre.</p>
+                  <label className="flex items-center gap-2 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={allowConsumidorFinal}
+                      onChange={(e) => setAllowConsumidorFinal(e.target.checked)}
+                      className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    Facturar como Consumidor Final
+                  </label>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -181,10 +200,11 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || selectedIds.size === 0}
+                disabled={submitting || repLoading || selectedIds.size === 0 || invoiceBlocked}
+                title={invoiceBlocked ? 'Falta la cédula del comprador — activa "Facturar como Consumidor Final" para continuar' : undefined}
                 className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
               >
-                <Receipt className="w-4 h-4" />
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Receipt className="w-4 h-4" />}
                 {submitting ? 'Facturando...' : 'Emitir Factura'}
               </button>
             </div>
