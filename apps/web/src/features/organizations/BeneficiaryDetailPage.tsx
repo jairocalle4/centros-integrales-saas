@@ -1260,6 +1260,7 @@ export function BeneficiaryDetailPage() {
                       </div>
                     </div>
                     {enr.services.length > 0 ? (
+                      <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead className="bg-white border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
                           <tr>
@@ -1305,6 +1306,7 @@ export function BeneficiaryDetailPage() {
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     ) : (
                       <p className="px-5 py-3 text-sm text-slate-400 italic">Sin servicios registrados en esta inscripción.</p>
                     )}

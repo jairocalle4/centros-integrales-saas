@@ -109,7 +109,7 @@ export function CitasHistorialModal({ isOpen, onClose }: Props) {
           </select>
         </div>
 
-        <div className="overflow-y-auto flex-1">
+        <div className="overflow-y-auto overflow-x-auto flex-1">
           {loading ? (
             <div className="p-10 text-center text-slate-400 animate-pulse text-sm">Cargando historial...</div>
           ) : filtered.length === 0 ? (

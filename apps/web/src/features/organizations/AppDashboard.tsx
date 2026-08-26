@@ -193,7 +193,7 @@ export function AppDashboard() {
       {loading ? (
         <SkeletonCards count={4} />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard
             icon={<Baby className="w-6 h-6 text-indigo-600" />}
             iconBg="bg-indigo-50"
@@ -201,6 +201,7 @@ export function AppDashboard() {
             value={kpis?.totalBeneficiarios ?? 0}
             subLabel={`+${kpis?.nuevosMesActual ?? 0} este mes`}
             link="/app/beneficiarios"
+            delayMs={0}
           />
           <KpiCard
             icon={<CalendarCheck className="w-6 h-6 text-emerald-600" />}
@@ -209,6 +210,7 @@ export function AppDashboard() {
             value={kpis?.asistenciaHoy ?? 0}
             subLabel="presentes registrados"
             link="/app/asistencia"
+            delayMs={60}
           />
           <KpiCard
             icon={<DollarSign className="w-6 h-6 text-amber-600" />}
@@ -217,6 +219,7 @@ export function AppDashboard() {
             value={`$${(kpis?.cobrosPendientes ?? 0).toFixed(2)}`}
             subLabel="por cobrar"
             link="/app/cobros"
+            delayMs={120}
           />
           <KpiCard
             icon={<TrendingUp className="w-6 h-6 text-violet-600" />}
@@ -225,6 +228,7 @@ export function AppDashboard() {
             value={`$${(kpis?.totalCobradoMes ?? 0).toFixed(2)}`}
             subLabel="pagos recibidos"
             link="/app/cobros"
+            delayMs={180}
           />
         </div>
       )}
@@ -232,14 +236,14 @@ export function AppDashboard() {
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Left Column (2/3 width): Hero Interactive Calendar */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-6 animate-fadeInUp" style={{ animationDelay: '220ms' }}>
           <DashboardCalendar />
         </div>
 
         {/* Right Column (1/3 width): Cobros Pendientes & Acciones Rápidas */}
         <div className="lg:col-span-1 space-y-6">
           {/* Cobros Pendientes Widget */}
-          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden animate-fadeInUp" style={{ animationDelay: '260ms' }}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
               <h2 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
                 <AlertCircle className="w-4 h-4 text-amber-500" />
@@ -308,7 +312,7 @@ export function AppDashboard() {
           </div>
 
           {/* Acciones Rápidas Widget */}
-          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-5">
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-5 animate-fadeInUp" style={{ animationDelay: '300ms' }}>
             <h2 className="font-bold text-slate-900 mb-3.5 flex items-center gap-2 text-sm">
               <ClipboardList className="w-4 h-4 text-indigo-500" />
               Acciones Rápidas
@@ -349,7 +353,7 @@ export function AppDashboard() {
 
           {/* Primeros Pasos si no hay beneficiarios */}
           {(kpis?.totalBeneficiarios === 0) && (
-            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 animate-fadeInUp" style={{ animationDelay: '340ms' }}>
               <h3 className="font-bold text-indigo-900 mb-2 flex items-center gap-2 text-xs uppercase tracking-wider">
                 <Clock className="w-4 h-4" />
                 Primeros Pasos
@@ -383,6 +387,7 @@ function KpiCard({
   value,
   subLabel,
   link,
+  delayMs = 0,
 }: {
   icon: React.ReactNode;
   iconBg: string;
@@ -390,11 +395,13 @@ function KpiCard({
   value: string | number;
   subLabel: string;
   link: string;
+  delayMs?: number;
 }) {
   return (
     <Link
       to={link}
-      className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex items-center gap-4 hover:border-slate-300 hover:shadow-md transition-all group"
+      className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex items-center gap-4 hover:border-slate-300 hover:shadow-md transition-all group animate-fadeInUp"
+      style={{ animationDelay: `${delayMs}ms` }}
     >
       <div className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center shrink-0`}>{icon}</div>
       <div className="min-w-0">

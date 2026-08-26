@@ -318,7 +318,7 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
         <div className="p-6 space-y-6">
 
           {/* Summary Cards */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
               <p className="text-xs text-slate-500 font-medium mb-1">Monto Total</p>
               <p className="text-lg font-bold text-slate-900">${Number(charge.amount).toFixed(2)}</p>
@@ -395,13 +395,13 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                   const hasAuthorizedInvoice = payment.sri_document_id && payment.sri_documents?.status === 'AUTHORIZED';
 
                   return (
-                    <div key={payment.id} className={`flex items-center justify-between gap-3 p-3 rounded-xl bg-white border shadow-sm transition-colors ${isVoided ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'}`}>
+                    <div key={payment.id} className={`flex flex-wrap items-center justify-between gap-3 gap-y-2 p-3 rounded-xl bg-white border shadow-sm transition-colors ${isVoided ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'}`}>
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                           <DollarSign className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          <p className={`text-sm font-medium text-slate-900 ${isVoided ? 'line-through' : ''}`}>
+                          <p className={`text-sm font-medium text-slate-900 truncate ${isVoided ? 'line-through' : ''}`}>
                             Abono en {getMethodLabel(payment.method)}
                           </p>
                           <div className="flex items-center gap-2 text-xs text-slate-500">

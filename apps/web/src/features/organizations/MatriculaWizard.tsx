@@ -1004,7 +1004,7 @@ export function MatriculaWizard() {
               {/* Add service line */}
               <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 space-y-2.5">
                 <p className="text-xs font-bold text-indigo-800">Agregar Terapia / Servicio</p>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   {services.length === 0 && !showQuickService ? (
                     <div className="flex-1 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
                       ⚠️ No hay servicios configurados todavía. Usa "Crear servicio rápido" abajo.
@@ -1014,7 +1014,7 @@ export function MatriculaWizard() {
                       <select
                         value={addingServiceId}
                         onChange={(e) => setAddingServiceId(e.target.value)}
-                        className="flex-1 px-3 py-2 text-sm border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+                        className="flex-1 min-w-0 px-3 py-2 text-sm border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                       >
                         <option value="">-- Seleccionar servicio del catálogo --</option>
                         {services.map(s => (
@@ -1025,7 +1025,7 @@ export function MatriculaWizard() {
                         type="button"
                         onClick={addServiceLine}
                         disabled={!addingServiceId}
-                        className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition flex items-center gap-1"
+                        className="w-full sm:w-auto px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition flex items-center justify-center gap-1"
                       >
                         <Plus className="w-4 h-4" />
                         Agregar
@@ -1148,7 +1148,7 @@ export function MatriculaWizard() {
                               </div>
 
                               {/* Modalidad: Continua vs Paquete */}
-                              <div className="mt-2 ml-2 mr-4 bg-slate-50 p-2 rounded border border-slate-200 flex items-center gap-4">
+                              <div className="mt-2 ml-2 mr-4 bg-slate-50 p-2 rounded border border-slate-200 flex flex-wrap items-center gap-4">
                                 <div className="flex items-center gap-2">
                                   <span className="text-[11px] font-bold text-slate-500 uppercase">Modalidad:</span>
                                   <select
@@ -1298,7 +1298,7 @@ export function MatriculaWizard() {
                       : 'Si el representante va a pagar ahora mismo (50%, el total, o cualquier abono), regístralo aquí.'}
                   </p>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={labelClass}>Monto (USD)</label>
                     <input

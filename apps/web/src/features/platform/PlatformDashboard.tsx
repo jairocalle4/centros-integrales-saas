@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../auth/AuthProvider';
@@ -66,6 +67,7 @@ type PlatformAdmin = {
 
 export function PlatformDashboard() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'dashboard';
 
@@ -78,7 +80,6 @@ export function PlatformDashboard() {
   const [totalBeneficiariesCount, setTotalBeneficiariesCount] = useState(0);
   const [totalMembersCount, setTotalMembersCount] = useState(0);
   const [totalVolumeProcessed, setTotalVolumeProcessed] = useState(0);
-  const [loading, setLoading] = useState(true);
 
   // Audit & Invitation Tab States
   const [auditSubTab, setAuditSubTab] = useState<'invitations' | 'logs'>('invitations');
@@ -140,7 +141,6 @@ export function PlatformDashboard() {
 
 
   useEffect(() => {
-    fetchData();
     if (user) {
       const fetchProfileData = async () => {
         const { data } = await supabase
@@ -175,65 +175,80 @@ export function PlatformDashboard() {
     loadPlatformSettings();
   }, [user]);
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      // Load all platform metrics in parallel
-      const [
-        { data: orgsData },
-        { data: subsData },
-        { data: plansData },
-        { data: logsData },
-        { data: invsData },
-        { data: adminsData },
-        benRes,
-        memRes,
-        pmtsRes
-      ] = await Promise.all([
-        supabase.from('organizations').select('*').order('created_at', { ascending: false }),
-        supabase.from('subscriptions').select('organization_id, status, trial_start, trial_end, current_period_end, plan_id'),
-        supabase.from('subscription_plans').select('*').order('created_at', { ascending: true }),
-        supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100),
-        (supabase as any).from('invitations').select('*, organizations(name)').order('created_at', { ascending: false }),
-        (supabase as any).from('platform_admins').select('user_id, created_at, profiles(first_name, last_name)').order('created_at', { ascending: false }),
-        supabase.from('beneficiaries').select('id', { count: 'exact', head: true }),
-        supabase.from('organization_members').select('id', { count: 'exact', head: true }),
-        supabase.from('internal_payments').select('amount'),
-      ]);
+  const fetchPlatformData = async () => {
+    // Load all platform metrics in parallel
+    const [
+      { data: orgsData },
+      { data: subsData },
+      { data: plansData },
+      { data: logsData },
+      { data: invsData },
+      { data: adminsData },
+      benRes,
+      memRes,
+      pmtsRes
+    ] = await Promise.all([
+      supabase.from('organizations').select('*').order('created_at', { ascending: false }),
+      supabase.from('subscriptions').select('organization_id, status, trial_start, trial_end, current_period_end, plan_id'),
+      supabase.from('subscription_plans').select('*').order('created_at', { ascending: true }),
+      supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100),
+      (supabase as any).from('invitations').select('*, organizations(name)').order('created_at', { ascending: false }),
+      (supabase as any).from('platform_admins').select('user_id, created_at, profiles(first_name, last_name)').order('created_at', { ascending: false }),
+      supabase.from('beneficiaries').select('id', { count: 'exact', head: true }),
+      supabase.from('organization_members').select('id', { count: 'exact', head: true }),
+      supabase.from('internal_payments').select('amount'),
+    ]);
 
-      if (orgsData) {
-        const mergedOrgs = orgsData.map((org) => {
-          const sub = subsData?.find((s) => s.organization_id === org.id);
-          return { 
-            ...org, 
-            status: sub?.status || 'sin_plan',
-            trial_start: sub?.trial_start,
-            trial_end: sub?.trial_end,
-            current_period_end: sub?.current_period_end,
-            plan_id: sub?.plan_id
-          };
-        });
-        setOrganizations(mergedOrgs);
-      }
+    const mergedOrgs = (orgsData || []).map((org) => {
+      const sub = subsData?.find((s) => s.organization_id === org.id);
+      return {
+        ...org,
+        status: sub?.status || 'sin_plan',
+        trial_start: sub?.trial_start,
+        trial_end: sub?.trial_end,
+        current_period_end: sub?.current_period_end,
+        plan_id: sub?.plan_id
+      };
+    });
 
-      if (plansData) {
-        setPlans(plansData as any as SubscriptionPlan[]);
-      }
+    const vol = (pmtsRes.data || []).reduce((sum, p: any) => sum + Number(p.amount), 0);
 
-      if (logsData) setAuditLogs(logsData);
-      if (invsData) setInvitations(invsData as any as Invitation[]);
-      if (adminsData) setPlatformAdmins(adminsData as any as PlatformAdmin[]);
-
-      setTotalBeneficiariesCount(benRes.count || 0);
-      setTotalMembersCount(memRes.count || 0);
-      const vol = (pmtsRes.data || []).reduce((sum, p: any) => sum + Number(p.amount), 0);
-      setTotalVolumeProcessed(vol);
-    } catch (err) {
-      console.error('Error cargando datos de plataforma:', err);
-    } finally {
-      setLoading(false);
-    }
+    return {
+      organizations: mergedOrgs,
+      plans: (plansData as any as SubscriptionPlan[]) || [],
+      auditLogs: logsData || [],
+      invitations: (invsData as any as Invitation[]) || [],
+      platformAdmins: (adminsData as any as PlatformAdmin[]) || [],
+      totalBeneficiariesCount: benRes.count || 0,
+      totalMembersCount: memRes.count || 0,
+      totalVolumeProcessed: vol,
+    };
   };
+
+  // React Query en vez de un solo fetch al montar: el superadmin ya no
+  // depende de F5 para ver, por ejemplo, que una invitación pasó de
+  // pendiente a aceptada — se refresca solo al volver a la pestaña
+  // (refetchOnWindowFocus) y cada 45s mientras siga activa (refetchInterval).
+  const { data: platformData, isLoading: loading } = useQuery({
+    queryKey: ['platform-dashboard'],
+    queryFn: fetchPlatformData,
+    refetchOnWindowFocus: true,
+    refetchInterval: 45000,
+  });
+
+  const invalidatePlatformData = () => queryClient.invalidateQueries({ queryKey: ['platform-dashboard'] });
+
+  useLayoutEffect(() => {
+    if (!platformData) return;
+    setOrganizations(platformData.organizations);
+    setPlans(platformData.plans);
+    setAuditLogs(platformData.auditLogs);
+    setInvitations(platformData.invitations);
+    setPlatformAdmins(platformData.platformAdmins);
+    setTotalBeneficiariesCount(platformData.totalBeneficiariesCount);
+    setTotalMembersCount(platformData.totalMembersCount);
+    setTotalVolumeProcessed(platformData.totalVolumeProcessed);
+  }, [platformData]);
 
   const handleCancelInvitation = async (invId: string) => {
     try {
@@ -244,7 +259,7 @@ export function PlatformDashboard() {
 
       if (error) throw error;
       toast.success('Invitación cancelada.');
-      fetchData();
+      invalidatePlatformData();
     } catch (err: any) {
       toast.error('Error al cancelar invitación: ' + err.message);
     }
@@ -272,7 +287,7 @@ export function PlatformDashboard() {
       setNewOrgName('');
       setNewOrgPlanId('');
       setIsCreatingOrg(false);
-      fetchData();
+      invalidatePlatformData();
     }
     setIsSubmittingOrg(false);
   };
@@ -287,7 +302,7 @@ export function PlatformDashboard() {
       toast.error('Error actualizando estado: ' + error.message);
     } else {
       toast.success('Estado actualizado.');
-      fetchData();
+      invalidatePlatformData();
     }
   };
 
@@ -414,7 +429,7 @@ export function PlatformDashboard() {
       toast.success('Plan guardado exitosamente.');
       setIsPlanModalOpen(false);
       setEditingPlanId(null);
-      fetchData();
+      invalidatePlatformData();
     }
     setIsSubmittingPlan(false);
   };

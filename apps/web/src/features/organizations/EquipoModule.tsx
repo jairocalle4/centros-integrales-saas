@@ -232,10 +232,10 @@ export function EquipoModule() {
                 const canEditThisMember = canManageMembers && !isSelf && (!isOwner || currentRole === 'owner');
 
                 return (
-                  <li key={member.id} className="flex items-center justify-between gap-x-6 py-4">
+                  <li key={member.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-x-6 py-4">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-x-3">
-                        <p className="text-sm font-semibold text-slate-900">
+                      <div className="flex items-center gap-x-3 flex-wrap">
+                        <p className="text-sm font-semibold text-slate-900 truncate">
                           {member.profiles?.first_name || 'Usuario'} {member.profiles?.last_name || ''}
                           {isSelf && <span className="text-slate-400 font-normal"> (tú)</span>}
                         </p>
@@ -252,7 +252,7 @@ export function EquipoModule() {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-x-3">
+                    <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
                       <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
                         <CheckCircle className="w-3.5 h-3.5" />
                         {member.status}

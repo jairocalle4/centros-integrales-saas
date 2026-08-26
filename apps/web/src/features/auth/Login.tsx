@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { supabase } from '../../lib/supabase';
 import { useNavigate, Link } from 'react-router';
+import { Loader2 } from 'lucide-react';
 
 const loginSchema = z.object({
   email: z.string().email('Por favor ingresa un correo electrónico válido'),
@@ -46,18 +47,18 @@ export function Login() {
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-slate-50">
       {/* Sección Izquierda: Marca y Mensaje Premium */}
       <div className="hidden lg:flex lg:w-1/2 bg-slate-900 flex-col justify-between p-12 text-white">
-        <div>
+        <div className="animate-fadeInUp" style={{ animationDelay: '0ms' }}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-500 rounded-lg shadow-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-indigo-600 rounded-lg shadow-lg flex items-center justify-center">
               <span className="text-xl font-bold tracking-tighter">NK</span>
             </div>
             <span className="text-2xl font-bold tracking-tight">NexoKids</span>
           </div>
         </div>
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fadeInUp" style={{ animationDelay: '80ms' }}>
           <h1 className="text-4xl font-bold leading-tight">
             Gestión Inteligente para Centros de Desarrollo y Guarderías.
           </h1>
@@ -65,26 +66,26 @@ export function Login() {
             NexoKids proporciona a tu equipo las herramientas necesarias para escalar, gestionar pagos y agilizar la comunicación con los representantes de manera centralizada.
           </p>
         </div>
-        <div className="text-sm text-slate-500">
+        <div className="text-sm text-slate-500 animate-fadeInUp" style={{ animationDelay: '140ms' }}>
           © {new Date().getFullYear()} NexoKids Inc. Plataforma Exclusiva B2B.
         </div>
       </div>
 
       {/* Sección Derecha: Formulario */}
       <div className="flex w-full lg:w-1/2 flex-col justify-center px-6 py-12 sm:px-12 lg:px-24 bg-white shadow-[0_0_40px_rgba(0,0,0,0.03)] z-10">
-        <div className="mx-auto w-full max-w-sm">
+        <div className="mx-auto w-full max-w-sm animate-fadeInUp" style={{ animationDelay: '60ms' }}>
           {/* Logo solo en móvil */}
           <div className="flex lg:hidden items-center gap-3 mb-8">
             <div className="w-10 h-10 bg-indigo-600 rounded-lg shadow flex items-center justify-center text-white">
               <span className="text-xl font-bold tracking-tighter">NK</span>
             </div>
-            <span className="text-2xl font-bold tracking-tight text-gray-900">NexoKids</span>
+            <span className="text-2xl font-bold tracking-tight text-slate-900">NexoKids</span>
           </div>
 
-          <h2 className="text-3xl font-bold tracking-tight text-gray-900 mb-2">
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">
             Bienvenido
           </h2>
-          <p className="text-sm text-gray-500 mb-8">
+          <p className="text-sm text-slate-500 mb-8">
             Ingresa a tu espacio de trabajo para continuar.
           </p>
 
@@ -99,13 +100,13 @@ export function Login() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
                 Correo Electrónico
               </label>
               <input
                 type="email"
                 {...register('email')}
-                className="block w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors shadow-sm"
+                className="block w-full rounded-lg border border-slate-300 px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors shadow-sm"
                 placeholder="tu@correo.com"
               />
               {errors.email && (
@@ -114,20 +115,20 @@ export function Login() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
                 Contraseña
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   {...register('password')}
-                  className="block w-full rounded-lg border border-gray-300 px-4 py-3 pr-11 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors shadow-sm"
+                  className="block w-full rounded-lg border border-slate-300 px-4 py-3 pr-11 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors shadow-sm"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 hover:text-gray-600 focus:outline-none"
+                  className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 hover:text-slate-600 focus:outline-none transition-transform active:scale-90"
                   aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 >
                   {showPassword ? (
@@ -158,13 +159,14 @@ export function Login() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex w-full justify-center rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:bg-indigo-400 transition-all active:scale-[0.98]"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:bg-indigo-400 transition-all active:scale-[0.98]"
             >
+              {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
               {isSubmitting ? 'Iniciando sesión...' : 'Ingresar al panel'}
             </button>
           </form>
           <div className="mt-10 text-center">
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-slate-400">
               El acceso es restringido y gestionado de manera centralizada.<br/>
               Si no tienes una cuenta, contacta a la administración de tu centro.
             </p>

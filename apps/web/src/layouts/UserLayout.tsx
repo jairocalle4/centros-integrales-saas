@@ -556,8 +556,8 @@ function LayoutContent() {
       {/* --- MOBILE SIDEBAR & OVERLAY --- */}
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
-          <aside className="relative flex-1 max-w-xs w-full bg-white flex flex-col shadow-xl">
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm animate-fadeIn" onClick={() => setIsMobileMenuOpen(false)} />
+          <aside className="relative flex-1 max-w-xs w-full bg-white flex flex-col shadow-xl animate-slideInLeft">
             <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">NK</div>

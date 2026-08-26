@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useLayoutEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router';
 import { supabase } from '../../lib/supabase';
 import { Building2, ArrowLeft, Users, Mail, CreditCard, Trash2, ShieldCheck, Check, Clock, AlertCircle, PackageCheck, FileKey2, Loader2 } from 'lucide-react';
@@ -52,10 +53,10 @@ type OrgInvitation = {
 
 export function PlatformOrganizationDetail() {
   const { id: orgId } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [invitations, setInvitations] = useState<OrgInvitation[]>([]);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'members' | 'invitations' | 'payments' | 'billing'>('members');
 
   // Facturación electrónica SRI
@@ -83,78 +84,109 @@ export function PlatformOrganizationDetail() {
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
   const [isAssigningPlan, setIsAssigningPlan] = useState(false);
 
-  const loadDetails = useCallback(async () => {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      // 1. Obtener datos de la organización
-      const { data: orgData, error: orgError } = await supabase
-        .from('organizations')
-        .select('*')
-        .eq('id', orgId)
-        .single();
-      if (orgError) throw orgError;
+  const fetchDetails = useCallback(async () => {
+    if (!orgId) throw new Error('Falta el id de la organización.');
 
-      // 2. Obtener estado de suscripción con nombre y precios del plan
-      const { data: subData } = await supabase
-        .from('subscriptions')
-        .select(`
-          status,
-          plan_id,
-          subscription_plans (
-            id,
-            name,
-            price_monthly,
-            price_annual
-          )
-        `)
-        .eq('organization_id', orgId)
-        .single();
+    // 1. Obtener datos de la organización
+    const { data: orgData, error: orgError } = await supabase
+      .from('organizations')
+      .select('*')
+      .eq('id', orgId)
+      .single();
+    if (orgError) throw orgError;
 
-      const planData = subData?.subscription_plans as any;
-      const org: Organization = {
-        ...orgData,
-        subscription_status: subData?.status,
-        plan_id: subData?.plan_id,
-        plan_name: planData?.name,
-        plan_price: planData?.price_monthly,
-        plan_price_annual: planData?.price_annual,
-      };
-      setOrganization(org);
-      setSelectedPlanId(subData?.plan_id || '');
+    // 2. Obtener estado de suscripción con nombre y precios del plan
+    const { data: subData } = await supabase
+      .from('subscriptions')
+      .select(`
+        status,
+        plan_id,
+        subscription_plans (
+          id,
+          name,
+          price_monthly,
+          price_annual
+        )
+      `)
+      .eq('organization_id', orgId)
+      .single();
 
-      // 3. Obtener planes disponibles
-      const { data: plansData } = await supabase
-        .from('subscription_plans')
-        .select('id, name, price_monthly, price_annual')
-        .order('price_monthly', { ascending: true });
-      setAvailablePlans((plansData as SubscriptionPlan[]) || []);
+    const planData = subData?.subscription_plans as any;
+    const org: Organization = {
+      ...orgData,
+      subscription_status: subData?.status,
+      plan_id: subData?.plan_id,
+      plan_name: planData?.name,
+      plan_price: planData?.price_monthly,
+      plan_price_annual: planData?.price_annual,
+    };
 
-      // 4. Obtener usuarios
-      const { data: usersData, error: usersError } = await supabase.rpc('get_organization_users', { p_organization_id: orgId });
-      if (usersError) throw usersError;
-      setUsers((usersData as unknown as OrgUser[]) || []);
+    // 3. Obtener planes disponibles
+    const { data: plansData } = await supabase
+      .from('subscription_plans')
+      .select('id, name, price_monthly, price_annual')
+      .order('price_monthly', { ascending: true });
 
-      // 5. Obtener invitaciones
-      const { data: invData, error: invError } = await supabase.rpc('get_organization_invitations', { p_organization_id: orgId });
-      if (invError) throw invError;
-      setInvitations((invData as unknown as OrgInvitation[]) || []);
+    // 4. Obtener usuarios
+    const { data: usersData, error: usersError } = await supabase.rpc('get_organization_users', { p_organization_id: orgId });
+    if (usersError) throw usersError;
 
-      // 6. Obtener configuración SRI (si el centro ya la configuró)
-      const { data: sriData } = await supabase
-        .from('sri_configurations')
-        .select('environment, establecimiento, punto_emision, cert_uploaded_at')
-        .eq('organization_id', orgId)
-        .maybeSingle();
-      setSriConfig((sriData as SriConfig) || null);
-      if (sriData) setSriEnvironment((sriData as SriConfig).environment);
+    // 5. Obtener invitaciones
+    const { data: invData, error: invError } = await supabase.rpc('get_organization_invitations', { p_organization_id: orgId });
+    if (invError) throw invError;
 
-    } catch (err: any) {
-      console.error('Error loading details:', err);
-    } finally {
-      setLoading(false);
-    }
+    // 6. Obtener configuración SRI (si el centro ya la configuró)
+    const { data: sriData } = await supabase
+      .from('sri_configurations')
+      .select('environment, establecimiento, punto_emision, cert_uploaded_at')
+      .eq('organization_id', orgId)
+      .maybeSingle();
+
+    return {
+      organization: org,
+      availablePlans: (plansData as SubscriptionPlan[]) || [],
+      users: (usersData as unknown as OrgUser[]) || [],
+      invitations: (invData as unknown as OrgInvitation[]) || [],
+      sriConfig: (sriData as SriConfig) || null,
+    };
   }, [orgId]);
+
+  // React Query en vez de un solo fetch al montar: así el superadmin ya no
+  // depende de F5 para ver, por ejemplo, que un representante aceptó una
+  // invitación en su propia sesión — se refresca solo al volver a la
+  // pestaña (refetchOnWindowFocus) y cada 45s mientras la pestaña siga
+  // activa (refetchInterval).
+  const { data: orgDetailData, isLoading: loading } = useQuery({
+    queryKey: ['org-detail', orgId],
+    queryFn: fetchDetails,
+    enabled: !!orgId,
+    refetchOnWindowFocus: true,
+    refetchInterval: 45000,
+  });
+
+  const invalidateOrgDetail = () => queryClient.invalidateQueries({ queryKey: ['org-detail', orgId] });
+
+  useLayoutEffect(() => {
+    if (!orgDetailData) return;
+    setOrganization(orgDetailData.organization);
+    setUsers(orgDetailData.users);
+    setInvitations(orgDetailData.invitations);
+    setSriConfig(orgDetailData.sriConfig);
+    setAvailablePlans(orgDetailData.availablePlans);
+  }, [orgDetailData]);
+
+  // Estos dos son borradores editables (el superadmin puede cambiar la
+  // selección antes de guardar) — se resincronizan solo cuando el valor
+  // GUARDADO realmente cambia, nunca en cada refetch de fondo, para no
+  // pisar una selección que el superadmin todavía no guardó.
+  useLayoutEffect(() => {
+    setSelectedPlanId(orgDetailData?.organization.plan_id || '');
+  }, [orgDetailData?.organization.plan_id]);
+
+  useLayoutEffect(() => {
+    const env = orgDetailData?.sriConfig?.environment;
+    if (env) setSriEnvironment(env);
+  }, [orgDetailData?.sriConfig?.environment]);
 
   const handleAssignPlan = async () => {
     if (!orgId || !selectedPlanId) return;
@@ -166,17 +198,13 @@ export function PlatformOrganizationDetail() {
       });
       if (error) throw error;
       toast.success('Plan actualizado correctamente.');
-      await loadDetails();
+      await invalidateOrgDetail();
     } catch (err: any) {
       toast.error('Error al asignar plan: ' + err.message);
     } finally {
       setIsAssigningPlan(false);
     }
   };
-
-  useEffect(() => {
-    loadDetails();
-  }, [loadDetails]);
 
   const handleSaveSriEnvironment = async () => {
     if (!orgId) return;
@@ -188,7 +216,7 @@ export function PlatformOrganizationDetail() {
         .eq('organization_id', orgId);
       if (error) throw error;
       toast.success('Ambiente SRI actualizado.');
-      await loadDetails();
+      await invalidateOrgDetail();
     } catch (err: any) {
       toast.error('Error al guardar el ambiente: ' + err.message);
     } finally {
@@ -212,7 +240,7 @@ export function PlatformOrganizationDetail() {
       });
       if (error) throw error;
       setInviteStatus({ type: 'success', msg: 'Invitación enviada exitosamente.' });
-      loadDetails();
+      invalidateOrgDetail();
       setTimeout(() => {
         setIsInviteOpen(false);
         setInviteEmail('');
@@ -231,7 +259,7 @@ export function PlatformOrganizationDetail() {
       const { error } = await supabase.rpc('cancel_invitation', { p_invitation_id: confirmCancelInv.id });
       if (error) throw error;
       toast.success('Invitación cancelada correctamente.');
-      loadDetails();
+      invalidateOrgDetail();
     } catch (err: any) {
       toast.error('Error al cancelar: ' + err.message);
     } finally {
@@ -255,7 +283,7 @@ export function PlatformOrganizationDetail() {
       if (error) throw error;
       toast.success('Pago registrado exitosamente.');
       setIsPaymentOpen(false);
-      loadDetails();
+      invalidateOrgDetail();
     } catch (err: any) {
       toast.error('Error registrando pago: ' + err.message);
     } finally {
@@ -383,9 +411,15 @@ export function PlatformOrganizationDetail() {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
-                            <Check className="w-4 h-4" /> Activo
-                          </span>
+                          {u.status === 'active' ? (
+                            <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
+                              <Check className="w-4 h-4" /> Activo
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1.5 text-slate-500 font-medium">
+                              <AlertCircle className="w-4 h-4" /> Inactivo
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-slate-400">
                           {formatDate(u.created_at)}
@@ -502,11 +536,11 @@ export function PlatformOrganizationDetail() {
               {/* Cambiar plan */}
               <div className="border-t border-slate-100 pt-5">
                 <p className="text-sm font-semibold text-slate-700 mb-3">Cambiar Plan</p>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <select
                     value={selectedPlanId}
                     onChange={(e) => setSelectedPlanId(e.target.value)}
-                    className="flex-1 bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="flex-1 min-w-0 bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="" disabled>Selecciona un plan</option>
                     {availablePlans.map(p => (
@@ -518,7 +552,7 @@ export function PlatformOrganizationDetail() {
                   <button
                     onClick={handleAssignPlan}
                     disabled={isAssigningPlan || selectedPlanId === organization.plan_id}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap w-full sm:w-auto"
                   >
                     {isAssigningPlan ? 'Aplicando...' : 'Aplicar Plan'}
                   </button>
@@ -606,11 +640,11 @@ export function PlatformOrganizationDetail() {
                 </div>
 
                 <label className="block text-sm font-medium text-slate-700 mb-1">Ambiente</label>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <select
                     value={sriEnvironment}
                     onChange={(e) => setSriEnvironment(e.target.value as 'pruebas' | 'produccion')}
-                    className="flex-1 bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="flex-1 min-w-0 bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="pruebas">Pruebas (celcer.sri.gob.ec)</option>
                     <option value="produccion">Producción (cel.sri.gob.ec)</option>
@@ -618,7 +652,7 @@ export function PlatformOrganizationDetail() {
                   <button
                     onClick={handleSaveSriEnvironment}
                     disabled={savingSriEnv || sriEnvironment === sriConfig.environment}
-                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap w-full sm:w-auto"
                   >
                     {savingSriEnv && <Loader2 className="w-4 h-4 animate-spin" />}
                     {savingSriEnv ? 'Guardando...' : 'Guardar'}
