@@ -75,6 +75,14 @@ type EnrollmentServiceLine = {
   billing_mode: 'continuous' | 'finite';
 };
 
+// Continua ("Servicio Mensual"): unit_price ya es un monto fijo por el
+// período generado — NO se multiplica por la cantidad de fechas (un mes
+// de guardería vale lo mismo tenga 20 o 23 días hábiles). Finito: sigue
+// siendo precio por sesión × cantidad real de fechas agregadas.
+function serviceLineCost(s: Pick<EnrollmentServiceLine, 'billing_mode' | 'unit_price' | 'sessionDates'>): number {
+  return s.billing_mode === 'continuous' ? s.unit_price : s.unit_price * s.sessionDates.length;
+}
+
 type BeneficiaryForm = {
   id?: string;
   first_name: string;
@@ -140,13 +148,11 @@ export function MatriculaWizard() {
     relationship: 'Madre',
   });
 
-  // Total = precio/sesión × cantidad real de fechas agregadas. No usa
-  // "sesiones/semana" — ese campo quedó desconectado del conteo real y
-  // generaba cargos que no correspondían a las fechas efectivamente creadas.
-  const totalAmount = enrollmentServices.reduce(
-    (sum, s) => sum + s.unit_price * s.sessionDates.length,
-    0
-  );
+  // Ver serviceLineCost: precio/sesión × fechas para Finito, monto fijo
+  // para Continua ("Servicio Mensual"). No usa "sesiones/semana" — ese
+  // campo quedó desconectado del conteo real y generaba cargos que no
+  // correspondían a las fechas efectivamente creadas.
+  const totalAmount = enrollmentServices.reduce((sum, s) => sum + serviceLineCost(s), 0);
 
   // ─── Effects ────────────────────────────────────────────────────────────────
 
@@ -1193,7 +1199,9 @@ export function MatriculaWizard() {
                                     </select>
                                   </div>
                                   <div className="flex items-center gap-1">
-                                    <span className="text-[11px] font-bold text-slate-500 uppercase">Precio/ses.</span>
+                                    <span className="text-[11px] font-bold text-slate-500 uppercase">
+                                      {svc.billing_mode === 'continuous' ? 'Precio Mensual' : 'Precio/ses.'}
+                                    </span>
                                     <span className="text-slate-400 text-xs font-bold">$</span>
                                     <input
                                       type="number" min={0} step={0.01}
@@ -1203,7 +1211,9 @@ export function MatriculaWizard() {
                                     />
                                   </div>
                                   <span className="font-extrabold text-indigo-800 font-mono text-sm min-w-[90px] text-right">
-                                    = ${(svc.unit_price * svc.sessionDates.length).toFixed(2)} ({svc.sessionDates.length} ses.)
+                                    {svc.billing_mode === 'continuous'
+                                      ? `= $${svc.unit_price.toFixed(2)}/mes (${svc.sessionDates.length} ses.)`
+                                      : `= $${(svc.unit_price * svc.sessionDates.length).toFixed(2)} (${svc.sessionDates.length} ses.)`}
                                   </span>
                                   <button
                                     onClick={() => removeServiceLine(svc.service_id)}
@@ -1476,12 +1486,14 @@ export function MatriculaWizard() {
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Resumen</p>
                 {enrollmentServices.map(s => (
                   <div key={s.service_id} className="flex justify-between text-sm">
-                    <span className="text-slate-700">{s.service_name} ({s.sessionDates.length} ses.)</span>
-                    <span className="font-bold text-slate-900 font-mono">${(s.unit_price * s.sessionDates.length).toFixed(2)}</span>
+                    <span className="text-slate-700">
+                      {s.service_name} ({s.sessionDates.length} ses.{s.billing_mode === 'continuous' ? '/mes' : ''})
+                    </span>
+                    <span className="font-bold text-slate-900 font-mono">${serviceLineCost(s).toFixed(2)}</span>
                   </div>
                 ))}
                 <div className="border-t border-slate-200 pt-2 flex justify-between font-bold">
-                  <span className="text-slate-700">Total Semanal</span>
+                  <span className="text-slate-700">Total</span>
                   <span className="text-indigo-700 font-mono">${totalAmount.toFixed(2)}</span>
                 </div>
               </div>

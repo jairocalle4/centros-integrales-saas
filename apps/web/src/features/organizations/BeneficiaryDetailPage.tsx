@@ -969,7 +969,9 @@ export function BeneficiaryDetailPage() {
       const { error: attError } = await (supabase as any).from('attendance').insert(attendanceRows);
       if (attError) throw attError;
 
-      const amount = svc.unit_price * dates.length;
+      // Continua ("Servicio Mensual"): unit_price ya es el monto fijo del
+      // período, no se multiplica por la cantidad de fechas generadas.
+      const amount = svc.billing_mode === 'continuous' ? svc.unit_price : svc.unit_price * dates.length;
       const { error: chargeError } = await (supabase as any).from('charges').insert({
         organization_id: currentOrg.id,
         beneficiary_id: id,
@@ -1342,7 +1344,7 @@ export function BeneficiaryDetailPage() {
                             <th className="px-5 py-2 text-left">Terapia / Servicio</th>
                             <th className="px-4 py-2 text-center">Ses./Semana</th>
                             <th className="px-4 py-2 text-center">Dur. (min)</th>
-                            <th className="px-4 py-2 text-center">Precio/Sesión</th>
+                            <th className="px-4 py-2 text-center">Precio</th>
                             <th className="px-4 py-2 text-center">Ses. Completadas</th>
                             <th className="px-4 py-2 text-center">Estado</th>
                             <th className="px-4 py-2 text-center"></th>
@@ -1371,7 +1373,10 @@ export function BeneficiaryDetailPage() {
                               </td>
                               <td className="px-4 py-3 text-center text-slate-600 align-top">{svc.sessions_per_week}x</td>
                               <td className="px-4 py-3 text-center text-slate-600 align-top">{svc.session_duration_min}'</td>
-                              <td className="px-4 py-3 text-center font-mono font-bold text-indigo-800 align-top">${svc.unit_price.toFixed(2)}</td>
+                              <td className="px-4 py-3 text-center font-mono font-bold text-indigo-800 align-top">
+                                ${svc.unit_price.toFixed(2)}
+                                <span className="text-[10px] font-normal text-slate-400">{svc.billing_mode === 'continuous' ? '/mes' : '/ses.'}</span>
+                              </td>
                               <td className="px-4 py-3 text-center font-bold text-slate-900 align-top">{svc.sessions_completed}</td>
                               <td className="px-4 py-3 text-center align-top">
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusColor(svc.status)}`}>
