@@ -913,6 +913,7 @@ export function BeneficiaryDetailPage() {
       photoConsent: beneficiary.photo_consent ?? true,
       therapies: (comData as any)?.selected_therapies || {},
       paymentFrequency: (comData as any)?.payment_frequency || 'session',
+      scheduleLabel: (comData as any)?.schedule_label || undefined,
       signedDate: (comData as any)?.signed_at ? formatDate((comData as any).signed_at) : undefined,
       orgName: currentOrg.name,
       city: currentOrg.city || 'La Troncal',

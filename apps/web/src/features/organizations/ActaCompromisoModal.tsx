@@ -9,6 +9,7 @@ export type CommitmentData = {
   photoConsent: boolean;
   therapies: Record<string, boolean>;
   paymentFrequency: 'session' | 'weekly' | 'monthly';
+  scheduleLabel?: string;
   signedDate?: string;
   orgName?: string;
   city?: string;
@@ -144,7 +145,7 @@ export function ActaCompromisoModal({ isOpen, onClose, data, onSign }: Props) {
             <p>
               Por medio del presente documento, yo <strong>{data.representativeName || '__________________________________'}</strong>, portador(a) de la cédula de ciudadanía / RUC N° <strong>{data.representativeId || '__________________'}</strong> y correo electrónico <strong>{data.representativeEmail || '____________________'}</strong>, en mi calidad de representante legal del paciente <strong>{data.beneficiaryName || '__________________________________'}</strong>, declaro mi compromiso formal de{' '}
               {data.paymentFrequency === 'monthly' ? (
-                <>cumplir puntualmente con el horario mensual establecido para el servicio contratado, cuya jornada diaria tiene una duración de <strong>{data.sessionDuration || 40} minutos</strong>, de acuerdo con el horario acordado con la institución</>
+                <>cumplir puntualmente con el horario mensual establecido para el servicio contratado, cuya jornada diaria tiene una duración de <strong>{data.sessionDuration || 40} minutos</strong>{data.scheduleLabel ? <>, en el horario de <strong>{data.scheduleLabel}</strong></> : ''}</>
               ) : (
                 <>acudir con puntualidad al horario establecido para las sesiones terapéuticas, las cuales tienen una duración reglamentaria de <strong>{data.sessionDuration || 40} minutos</strong></>
               )}.

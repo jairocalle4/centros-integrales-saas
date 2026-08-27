@@ -60,6 +60,23 @@ function minutesBetween(start: string, end: string): number {
   return Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
 }
 
+// Texto legible del horario propuesto, para el Acta de Compromiso (ej.
+// "Lunes a Viernes, de 08:00 a 13:00") — siempre el horario real elegido
+// para ESTA inscripción, nunca uno genérico.
+function formatScheduleDays(days: number[]): string {
+  const set = new Set(days);
+  const key = [...set].sort((a, b) => a - b).join(',');
+  if (key === '1,2,3,4,5') return 'Lunes a Viernes';
+  if (key === '1,2,3,4,5,6') return 'Lunes a Sábado';
+  if (key === '0,1,2,3,4,5,6') return 'todos los días';
+  const weekOrder = [1, 2, 3, 4, 5, 6, 0];
+  return weekOrder.filter(d => set.has(d)).map(d => DAY_LABELS[d]).join(', ');
+}
+
+function formatScheduleLabel(days: number[], startTime: string, endTime: string): string {
+  return `${formatScheduleDays(days)}, de ${startTime} a ${endTime}`;
+}
+
 // Informational only (shown as "1x/sem" etc. elsewhere) — never used for
 // pricing anymore. Distinct weekdays among the exact dates picked.
 function distinctWeekdayCount(dates: ExactSession[]): number {
@@ -162,6 +179,8 @@ export function MatriculaWizard() {
   // correspondían a las fechas efectivamente creadas.
   const totalAmount = enrollmentServices.reduce((sum, s) => sum + serviceLineCost(s), 0);
   const hasContinuousService = enrollmentServices.some(s => s.billing_mode === 'continuous');
+  const firstContinuousService = enrollmentServices.find(s => s.billing_mode === 'continuous');
+  const actaSessionDuration = (hasContinuousService ? firstContinuousService : enrollmentServices[0])?.session_duration_min || 40;
 
   // ─── Effects ────────────────────────────────────────────────────────────────
 
@@ -418,6 +437,16 @@ export function MatriculaWizard() {
 
   const getMonthlyDraft = (serviceId: string): MonthlyDraft =>
     monthlyDraft[serviceId] || { days: DEFAULT_MONTHLY_DAYS, startTime: '08:00', endTime: '13:00' };
+
+  // Para el Acta de Compromiso: el horario real propuesto para el servicio
+  // mensual (no uno genérico) — ver formatScheduleLabel.
+  const monthlyScheduleLabel = firstContinuousService
+    ? formatScheduleLabel(
+        getMonthlyDraft(firstContinuousService.service_id).days,
+        getMonthlyDraft(firstContinuousService.service_id).startTime,
+        getMonthlyDraft(firstContinuousService.service_id).endTime
+      )
+    : undefined;
 
   const toggleMonthlyDay = (serviceId: string, day: number) => {
     setMonthlyDraft(prev => {
@@ -754,9 +783,10 @@ export function MatriculaWizard() {
         organization_id: currentOrg.id,
         beneficiary_id: benId,
         representative_id: repId || null,
-        session_duration_minutes: enrollmentServices[0]?.session_duration_min || 40,
+        session_duration_minutes: actaSessionDuration,
         selected_therapies: enrollmentServices.reduce((acc, s) => ({ ...acc, [s.service_name]: true }), {}),
         payment_frequency: hasContinuousService ? 'monthly' : 'session',
+        schedule_label: monthlyScheduleLabel || null,
         photo_consent: beneficiary.photo_consent,
         status: 'signed',
       });
@@ -1193,9 +1223,9 @@ export function MatriculaWizard() {
                                     {svc.billing_mode === 'continuous' ? (
                                       <span
                                         className="border border-slate-200 bg-slate-50 rounded-lg px-2 py-1 text-sm font-mono text-slate-600"
-                                        title="Calculada con la Hora Inicio y Hora Fin del Servicio Mensual, abajo"
+                                        title={`${minutesBetween(getMonthlyDraft(svc.service_id).startTime, getMonthlyDraft(svc.service_id).endTime)} min/día — definida por la Hora Inicio y Hora Fin del Servicio Mensual, abajo`}
                                       >
-                                        {minutesBetween(getMonthlyDraft(svc.service_id).startTime, getMonthlyDraft(svc.service_id).endTime)} min/día
+                                        {getMonthlyDraft(svc.service_id).startTime} - {getMonthlyDraft(svc.service_id).endTime}
                                       </span>
                                     ) : (
                                       <select
@@ -1584,10 +1614,11 @@ export function MatriculaWizard() {
             representativeId: representative.cedula || '—',
             representativeEmail: representative.email || '—',
             beneficiaryName: `${beneficiary.first_name} ${beneficiary.last_name}`,
-            sessionDuration: enrollmentServices[0]?.session_duration_min || 40,
+            sessionDuration: actaSessionDuration,
             photoConsent: beneficiary.photo_consent,
             therapies: enrollmentServices.reduce((acc, s) => ({ ...acc, [s.service_name]: true }), {}),
             paymentFrequency: hasContinuousService ? 'monthly' : 'session',
+            scheduleLabel: monthlyScheduleLabel,
             orgName: currentOrg?.name,
             city: currentOrg?.city || 'La Troncal',
           }}
