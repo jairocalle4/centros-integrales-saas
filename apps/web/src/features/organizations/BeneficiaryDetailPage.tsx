@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
 import { Skeleton, SkeletonCircle } from '../../components/ui/Skeleton';
 import { generateMonthlyDates, nextDayLocal, getDayOfWeekLocal } from '../../lib/monthlySchedule';
+import { validateCedulaEcuador } from '../../lib/validateEcuadorId';
 import {
   ArrowLeft,
   Baby,
@@ -422,6 +423,10 @@ function LinkRepresentativeModal({
       toast.error('Ingresa nombres y apellidos del representante.');
       return;
     }
+    if (form.identification.trim()) {
+      const cedulaError = validateCedulaEcuador(form.identification);
+      if (cedulaError) { toast.error(cedulaError); return; }
+    }
     setCreating(true);
     try {
       const { data, error } = await supabase
@@ -802,6 +807,10 @@ export function BeneficiaryDetailPage() {
 
   const handleEditSubmit = async (form: BeneficiaryFormState, setActive?: boolean) => {
     if (!id) return;
+    if (form.rep_mode === 'new' && form.rep_cedula.trim()) {
+      const cedulaError = validateCedulaEcuador(form.rep_cedula);
+      if (cedulaError) { toast.error(cedulaError); return; }
+    }
     setEditSubmitting(true);
     try {
       let repId = form.selected_rep_id;

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
+import { validateCedulaEcuador } from '../../lib/validateEcuadorId';
 import toast from 'react-hot-toast';
 import {
   Plus,
@@ -136,9 +137,12 @@ export function RepresentantesModule() {
       return;
     }
 
-    if (identification.trim() && identification.trim().length !== 10) {
-      toast.error('La cédula debe contener exactamente 10 dígitos.');
-      return;
+    if (identification.trim()) {
+      const cedulaError = validateCedulaEcuador(identification);
+      if (cedulaError) {
+        toast.error(cedulaError);
+        return;
+      }
     }
 
     if (!phone.trim()) {

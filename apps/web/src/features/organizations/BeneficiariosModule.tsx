@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
 import { SkeletonTable } from '../../components/ui/Skeleton';
 import { formatDate } from '../../lib/formatDate';
+import { validateCedulaEcuador } from '../../lib/validateEcuadorId';
 import {
   Users,
   Plus,
@@ -791,6 +792,10 @@ export function BeneficiariosModule() {
 
   const handleCreateSubmit = async (form: BeneficiaryFormState) => {
     if (!currentOrg) return;
+    if (form.rep_mode === 'new' && form.rep_cedula.trim()) {
+      const cedulaError = validateCedulaEcuador(form.rep_cedula);
+      if (cedulaError) { toast.error(cedulaError); return; }
+    }
     setSubmitting(true);
     try {
       let repId = form.selected_rep_id;
@@ -858,6 +863,10 @@ export function BeneficiariosModule() {
 
   const handleEditSubmit = async (form: BeneficiaryFormState, setActive?: boolean) => {
     if (!currentOrg || !editTarget) return;
+    if (form.rep_mode === 'new' && form.rep_cedula.trim()) {
+      const cedulaError = validateCedulaEcuador(form.rep_cedula);
+      if (cedulaError) { toast.error(cedulaError); return; }
+    }
     setSubmitting(true);
     try {
       let repId = form.selected_rep_id;

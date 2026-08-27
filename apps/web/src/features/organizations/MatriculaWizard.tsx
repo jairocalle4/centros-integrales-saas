@@ -20,6 +20,7 @@ import { ActaCompromisoModal } from './ActaCompromisoModal';
 import { EntityAutocomplete } from '../../components/ui/EntityAutocomplete';
 import { formatDate } from '../../lib/formatDate';
 import { generateMonthlyDates } from '../../lib/monthlySchedule';
+import { validateCedulaEcuador } from '../../lib/validateEcuadorId';
 
 const WEEKDAY_TOGGLES = [
   { day: 1, label: 'Lun' },
@@ -510,9 +511,12 @@ export function MatriculaWizard() {
           toast.error('Ingresa nombres y apellidos del representante.');
           return;
         }
-        if (representative.cedula.trim() && representative.cedula.trim().length !== 10) {
-          toast.error('La cédula debe contener exactamente 10 dígitos.');
-          return;
+        if (representative.cedula.trim()) {
+          const cedulaError = validateCedulaEcuador(representative.cedula);
+          if (cedulaError) {
+            toast.error(cedulaError);
+            return;
+          }
         }
         if (representative.phone.trim() && representative.phone.trim().length !== 10) {
           toast.error('El teléfono debe contener exactamente 10 dígitos.');
