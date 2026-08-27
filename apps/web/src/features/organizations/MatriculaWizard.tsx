@@ -52,6 +52,14 @@ function getDayOfWeekLocal(dateStr: string): number {
   return new Date(y, m - 1, d).getDay();
 }
 
+// Para Servicio Mensual: la duración diaria ya no se elige aparte, se
+// deriva de la Hora Inicio/Hora Fin del relleno automático.
+function minutesBetween(start: string, end: string): number {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  return Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+}
+
 // Informational only (shown as "1x/sem" etc. elsewhere) — never used for
 // pricing anymore. Distinct weekdays among the exact dates picked.
 function distinctWeekdayCount(dates: ExactSession[]): number {
@@ -153,6 +161,7 @@ export function MatriculaWizard() {
   // campo quedó desconectado del conteo real y generaba cargos que no
   // correspondían a las fechas efectivamente creadas.
   const totalAmount = enrollmentServices.reduce((sum, s) => sum + serviceLineCost(s), 0);
+  const hasContinuousService = enrollmentServices.some(s => s.billing_mode === 'continuous');
 
   // ─── Effects ────────────────────────────────────────────────────────────────
 
@@ -447,12 +456,8 @@ export function MatriculaWizard() {
     const dates = generateMonthlyDates(startDate, draft.days);
     if (dates.length === 0) { toast.error('No se generó ninguna fecha con esos días.'); return; }
 
-    const [sh, sm] = draft.startTime.split(':').map(Number);
-    const [eh, em] = draft.endTime.split(':').map(Number);
-    const durationMin = (eh * 60 + em) - (sh * 60 + sm);
-
     bulkAddSessionDates(serviceId, dates, draft.startTime);
-    updateServiceLine(serviceId, 'session_duration_min', durationMin);
+    updateServiceLine(serviceId, 'session_duration_min', minutesBetween(draft.startTime, draft.endTime));
     toast.success(`Se generaron ${dates.length} fechas, del ${formatDate(dates[0])} al ${formatDate(dates[dates.length - 1])}.`);
   };
 
@@ -594,8 +599,7 @@ export function MatriculaWizard() {
       // end_date = the latest exact session date picked, for finite packages
       // only (mixing in a continuous/subscription service means no fixed end).
       let calculatedEndDate: string | null = null;
-      const hasContinuous = enrollmentServices.some(s => s.billing_mode === 'continuous');
-      if (!hasContinuous) {
+      if (!hasContinuousService) {
         const allDates = enrollmentServices.flatMap(s => s.sessionDates.map(sd => sd.date));
         if (allDates.length > 0) {
           calculatedEndDate = allDates.reduce((max, d) => (d > max ? d : max), allDates[0]);
@@ -752,7 +756,7 @@ export function MatriculaWizard() {
         representative_id: repId || null,
         session_duration_minutes: enrollmentServices[0]?.session_duration_min || 40,
         selected_therapies: enrollmentServices.reduce((acc, s) => ({ ...acc, [s.service_name]: true }), {}),
-        payment_frequency: 'session',
+        payment_frequency: hasContinuousService ? 'monthly' : 'session',
         photo_consent: beneficiary.photo_consent,
         status: 'signed',
       });
@@ -1186,17 +1190,26 @@ export function MatriculaWizard() {
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <div className="flex items-center gap-1.5">
                                     <span className="text-[11px] font-bold text-slate-500 uppercase">Duración</span>
-                                    <select
-                                      className="border border-slate-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
-                                      value={svc.session_duration_min}
-                                      onChange={(e) => updateServiceLine(svc.service_id, 'session_duration_min', Number(e.target.value))}
-                                    >
-                                      <option value={30}>30 min</option>
-                                      <option value={40}>40 min</option>
-                                      <option value={45}>45 min</option>
-                                      <option value={60}>60 min</option>
-                                      <option value={90}>90 min</option>
-                                    </select>
+                                    {svc.billing_mode === 'continuous' ? (
+                                      <span
+                                        className="border border-slate-200 bg-slate-50 rounded-lg px-2 py-1 text-sm font-mono text-slate-600"
+                                        title="Calculada con la Hora Inicio y Hora Fin del Servicio Mensual, abajo"
+                                      >
+                                        {minutesBetween(getMonthlyDraft(svc.service_id).startTime, getMonthlyDraft(svc.service_id).endTime)} min/día
+                                      </span>
+                                    ) : (
+                                      <select
+                                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500"
+                                        value={svc.session_duration_min}
+                                        onChange={(e) => updateServiceLine(svc.service_id, 'session_duration_min', Number(e.target.value))}
+                                      >
+                                        <option value={30}>30 min</option>
+                                        <option value={40}>40 min</option>
+                                        <option value={45}>45 min</option>
+                                        <option value={60}>60 min</option>
+                                        <option value={90}>90 min</option>
+                                      </select>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-1">
                                     <span className="text-[11px] font-bold text-slate-500 uppercase">
@@ -1235,7 +1248,7 @@ export function MatriculaWizard() {
                                     onChange={(e) => updateServiceLine(svc.service_id, 'billing_mode', e.target.value)}
                                   >
                                     <option value="continuous">Suscripción (Continua)</option>
-                                    <option value="finite">Paquete (Finito)</option>
+                                    <option value="finite">Paquete por Sesiones</option>
                                   </select>
                                 </div>
                                 {svc.billing_mode === 'finite' && (
@@ -1574,7 +1587,7 @@ export function MatriculaWizard() {
             sessionDuration: enrollmentServices[0]?.session_duration_min || 40,
             photoConsent: beneficiary.photo_consent,
             therapies: enrollmentServices.reduce((acc, s) => ({ ...acc, [s.service_name]: true }), {}),
-            paymentFrequency: 'session',
+            paymentFrequency: hasContinuousService ? 'monthly' : 'session',
             orgName: currentOrg?.name,
             city: currentOrg?.city || 'La Troncal',
           }}

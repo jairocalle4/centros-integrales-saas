@@ -142,7 +142,12 @@ export function ActaCompromisoModal({ isOpen, onClose, data, onSign }: Props) {
           {/* Body Paragraphs */}
           <div className="space-y-4 text-justify font-serif text-[15px]">
             <p>
-              Por medio del presente documento, yo <strong>{data.representativeName || '__________________________________'}</strong>, portador(a) de la cédula de ciudadanía / RUC N° <strong>{data.representativeId || '__________________'}</strong> y correo electrónico <strong>{data.representativeEmail || '____________________'}</strong>, en mi calidad de representante legal del paciente <strong>{data.beneficiaryName || '__________________________________'}</strong>, declaro mi compromiso formal de acudir con puntualidad al horario establecido para las sesiones terapéuticas, las cuales tienen una duración reglamentaria de <strong>{data.sessionDuration || 40} minutos</strong>.
+              Por medio del presente documento, yo <strong>{data.representativeName || '__________________________________'}</strong>, portador(a) de la cédula de ciudadanía / RUC N° <strong>{data.representativeId || '__________________'}</strong> y correo electrónico <strong>{data.representativeEmail || '____________________'}</strong>, en mi calidad de representante legal del paciente <strong>{data.beneficiaryName || '__________________________________'}</strong>, declaro mi compromiso formal de{' '}
+              {data.paymentFrequency === 'monthly' ? (
+                <>cumplir puntualmente con el horario mensual establecido para el servicio contratado, cuya jornada diaria tiene una duración de <strong>{data.sessionDuration || 40} minutos</strong>, de acuerdo con el horario acordado con la institución</>
+              ) : (
+                <>acudir con puntualidad al horario establecido para las sesiones terapéuticas, las cuales tienen una duración reglamentaria de <strong>{data.sessionDuration || 40} minutos</strong></>
+              )}.
             </p>
             <p>
               Asimismo, me responsabilizo de notificar a la institución o al terapeuta a cargo con al menos <strong>24 horas de anticipación</strong> en caso de no poder asistir a una sesión agendada. Se establece un límite máximo de <strong>DOS (2) FALTAS JUSTIFICADAS AL AÑO</strong>.
