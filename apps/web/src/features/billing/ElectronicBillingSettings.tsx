@@ -24,7 +24,7 @@ export function ElectronicBillingSettings({ orgId, hasElectronicBilling }: { org
     environment: 'pruebas' as 'pruebas' | 'produccion',
     establecimiento: '001',
     punto_emision: '001',
-    regimen_fiscal: 'rimpe_negocio_popular' as 'rimpe_negocio_popular' | 'general',
+    regimen_fiscal: 'rimpe_negocio_popular' as 'rimpe_negocio_popular' | 'rimpe_emprendedor' | 'general',
     cert_password_hash: ''
   });
   const [certUploaded, setCertUploaded] = useState(false);
@@ -48,7 +48,7 @@ export function ElectronicBillingSettings({ orgId, hasElectronicBilling }: { org
           environment: (data.environment as 'pruebas' | 'produccion') || 'pruebas',
           establecimiento: data.establecimiento,
           punto_emision: data.punto_emision,
-          regimen_fiscal: (data.regimen_fiscal as 'rimpe_negocio_popular' | 'general') || 'rimpe_negocio_popular',
+          regimen_fiscal: (data.regimen_fiscal as 'rimpe_negocio_popular' | 'rimpe_emprendedor' | 'general') || 'rimpe_negocio_popular',
           cert_password_hash: '' // No cargar la contraseña por seguridad
         });
         setCertUploaded(Boolean(data.cert_uploaded_at));
@@ -214,10 +214,11 @@ export function ElectronicBillingSettings({ orgId, hasElectronicBilling }: { org
               <label className="block text-sm font-medium text-slate-700 mb-1">Régimen Tributario</label>
               <select
                 value={config.regimen_fiscal}
-                onChange={e => setConfig({ ...config, regimen_fiscal: e.target.value as 'rimpe_negocio_popular' | 'general' })}
+                onChange={e => setConfig({ ...config, regimen_fiscal: e.target.value as 'rimpe_negocio_popular' | 'rimpe_emprendedor' | 'general' })}
                 className="w-full max-w-md bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="rimpe_negocio_popular">RIMPE Negocio Popular (0% IVA)</option>
+                <option value="rimpe_emprendedor">RIMPE Emprendedor (con IVA)</option>
                 <option value="general">Régimen General (con IVA)</option>
               </select>
               <p className="text-xs text-slate-400 mt-1">

@@ -151,15 +151,18 @@ async function callRideService(payload: unknown) {
 }
 
 // ─── Cálculo de impuestos según régimen tributario ─────────────────────────
-// RIMPE Negocio Popular nunca cobra IVA (0%). Régimen General sí — a la
-// tarifa general vigente (15% desde abril 2024, Circular SRI
-// NAC-DGECCGC25-00000006). El monto que se registra como "pago" ya
-// incluye el IVA cuando el régimen es General (precio final que pagó la
-// familia), así que la factura desglosa hacia atrás.
+// RIMPE Negocio Popular nunca cobra IVA (0%). RIMPE Emprendedor y Régimen
+// General sí cobran IVA — a la tarifa general vigente (15% desde abril
+// 2024, Circular SRI NAC-DGECCGC25-00000006); la única diferencia entre
+// Emprendedor y General es la leyenda obligatoria en la factura, no el
+// cálculo del impuesto. El monto que se registra como "pago" ya incluye
+// el IVA cuando aplica (precio final que pagó la familia), así que la
+// factura desglosa hacia atrás.
 const RIMPE_NEGOCIO_POPULAR_LEGEND = 'CONTRIBUYENTE NEGOCIO POPULAR - RÉGIMEN RIMPE';
+const RIMPE_EMPRENDEDOR_LEGEND = 'CONTRIBUYENTE RÉGIMEN RIMPE';
 
 function computeSriInvoiceTax(total: number, regimenFiscal: string | null | undefined) {
-  if (regimenFiscal === 'general') {
+  if (regimenFiscal === 'general' || regimenFiscal === 'rimpe_emprendedor') {
     const baseImponible = Math.round((total / 1.15) * 100) / 100;
     // Por diferencia, no por tarifa: garantiza que base + IVA cierre
     // exacto contra el total que la familia realmente pagó — calcular el
@@ -173,12 +176,13 @@ function computeSriInvoiceTax(total: number, regimenFiscal: string | null | unde
       valor,
       // El DTO de la API SRI solo acepta 2 strings legales de RIMPE, o la
       // ausencia del campo — nunca un booleano ni una cadena vacía.
-      contribuyenteRimpe: undefined as string | undefined,
+      contribuyenteRimpe: (regimenFiscal === 'rimpe_emprendedor' ? RIMPE_EMPRENDEDOR_LEGEND : undefined) as string | undefined,
     };
   }
-  // Cualquier otro valor (incluye null/undefined de filas antiguas)
-  // preserva el comportamiento de siempre — ningún centro cambia de
-  // tarifa hasta elegir 'general' explícitamente.
+  // Cualquier otro valor (incluye 'rimpe_negocio_popular' y null/undefined
+  // de filas antiguas) preserva el comportamiento de siempre — ningún
+  // centro cambia de tarifa hasta elegir 'general' o 'rimpe_emprendedor'
+  // explícitamente.
   return {
     codigo: '2',
     codigoPorcentaje: '0',
@@ -1043,7 +1047,10 @@ async function handleUploadCertificate(supabaseClient: ReturnType<typeof createC
   if (!organization_id || !establecimiento || !punto_emision || !p12_base64 || !p12_password) {
     throw new Error('Faltan datos para subir la firma electrónica.');
   }
-  const regimenFiscal = regimen_fiscal === 'general' ? 'general' : 'rimpe_negocio_popular';
+  const regimenFiscal =
+    regimen_fiscal === 'general' ? 'general' :
+    regimen_fiscal === 'rimpe_emprendedor' ? 'rimpe_emprendedor' :
+    'rimpe_negocio_popular';
 
   // Only an owner of this org may upload its signing certificate.
   const { data: membership, error: membershipError } = await supabaseClient
@@ -1084,12 +1091,15 @@ async function handleUploadCertificate(supabaseClient: ReturnType<typeof createC
   // payload en vez de compartir uno solo. contribuyenteRimpe aquí es
   // booleano (DTO del módulo emisores) — distinto del string legal que se
   // usa en el payload de emisión de cada factura (computeSriInvoiceTax).
+  // Ambas variantes de RIMPE son "contribuyenteRimpe: true" para este DTO
+  // del emisor — la distinción Negocio Popular vs Emprendedor solo importa
+  // para la leyenda de cada factura, no para el registro del emisor.
   const emisorUpdatableFields = {
     razonSocial: org.name,
     nombreComercial: org.name,
     direccionMatriz: mainAddress,
     obligadoContabilidad: false,
-    contribuyenteRimpe: regimenFiscal === 'rimpe_negocio_popular',
+    contribuyenteRimpe: regimenFiscal === 'rimpe_negocio_popular' || regimenFiscal === 'rimpe_emprendedor',
     ambiente,
   };
 
