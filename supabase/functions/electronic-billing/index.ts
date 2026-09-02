@@ -232,13 +232,16 @@ async function sendInvoiceEmail(params: {
   total: number;
   pdfBytes: Uint8Array | null;
   xmlContent: string | null;
+  isCreditNote?: boolean;
 }): Promise<void> {
+  const filePrefix = params.isCreditNote ? 'nota-credito' : 'factura';
+  const docLabel = params.isCreditNote ? 'nota de crédito electrónica' : 'factura electrónica';
   const attachment: { name: string; content: string }[] = [];
   if (params.pdfBytes) {
-    attachment.push({ name: `factura-${params.claveAcceso}.pdf`, content: bytesToBase64(params.pdfBytes) });
+    attachment.push({ name: `${filePrefix}-${params.claveAcceso}.pdf`, content: bytesToBase64(params.pdfBytes) });
   }
   if (params.xmlContent) {
-    attachment.push({ name: `factura-${params.claveAcceso}.xml`, content: bytesToBase64(new TextEncoder().encode(params.xmlContent)) });
+    attachment.push({ name: `${filePrefix}-${params.claveAcceso}.xml`, content: bytesToBase64(new TextEncoder().encode(params.xmlContent)) });
   }
 
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -247,8 +250,8 @@ async function sendInvoiceEmail(params: {
     body: JSON.stringify({
       sender: { email: params.config.senderEmail, name: params.config.senderName },
       to: [{ email: params.to, name: params.customerName }],
-      subject: `Factura electrónica de ${params.organizationName}`,
-      htmlContent: `<p>Hola ${params.customerName},</p><p>Adjuntamos tu factura electrónica por $${params.total.toFixed(2)} emitida por ${params.organizationName}.</p><p>Clave de acceso: ${params.claveAcceso}</p>`,
+      subject: `${params.isCreditNote ? 'Nota de crédito electrónica' : 'Factura electrónica'} de ${params.organizationName}`,
+      htmlContent: `<p>Hola ${params.customerName},</p><p>Adjuntamos tu ${docLabel} por $${params.total.toFixed(2)} emitida por ${params.organizationName}.</p><p>Clave de acceso: ${params.claveAcceso}</p>`,
       ...(attachment.length > 0 ? { attachment } : {}),
     }),
   });
@@ -305,6 +308,9 @@ serve(async (req) => {
     }
     if (action === 'resend_email') {
       return await handleResendEmail(supabaseClient, adminClient, body);
+    }
+    if (action === 'credit_note') {
+      return await handleEmitCreditNote(supabaseClient, adminClient, body);
     }
     return await handleEmit(supabaseClient, adminClient, body);
 
@@ -685,6 +691,16 @@ function extractSecuencial(claveAcceso?: string): string {
   return '000000001';
 }
 
+// "establecimiento-puntoEmision-secuencial" (ej. "001-001-000000123") a
+// partir de la clave de acceso — mismo criterio que numDocModificado
+// espera en CreateNotaCreditoDto, y misma lógica de substrings que ya usa
+// RidePdfGenerator.cs (.NET) al parsear el número de comprobante para el
+// RIDE, para no duplicar dos formas distintas de calcular lo mismo.
+function formatSriDocumentNumber(claveAcceso: string | null | undefined): string {
+  if (!claveAcceso || claveAcceso.length !== 49) return claveAcceso ?? '';
+  return `${claveAcceso.substring(24, 27)}-${claveAcceso.substring(27, 30)}-${claveAcceso.substring(30, 39)}`;
+}
+
 function extractSriApiErrorMessage(result: any): string {
   if (Array.isArray(result?.mensajes) && result.mensajes.length > 0) {
     const first = result.mensajes[0];
@@ -700,6 +716,351 @@ function extractSriApiErrorMessage(result: any): string {
   if (Array.isArray(result?.message) && result.message.length > 0) return result.message[0];
   if (typeof result?.message === 'string') return result.message;
   return result?.error || 'Error del servicio de facturación.';
+}
+
+// ─── Emitir una Nota de Crédito que anula (100%) una factura AUTHORIZED ───
+// Endpoint y DTO reales de open-api-facturacion-sri confirmados contra su
+// /api-json antes de escribir este payload (CreateNotaCreditoDto /
+// NotaCreditoResponseDto) — misma forma que la factura (emisor/comprador/
+// impuestos), más codDocModificado/numDocModificado/fechaEmisionDocSustento/
+// motivo. Alcance v1: solo anulación TOTAL del monto de la factura
+// original (decisión explícita del usuario) — no hay UI ni lógica para
+// montos parciales.
+
+async function handleEmitCreditNote(
+  supabaseClient: ReturnType<typeof createClient>,
+  adminClient: ReturnType<typeof createClient>,
+  body: any,
+) {
+  const { organization_id, sri_document_id, motivo, void_payments } = body as {
+    organization_id?: string;
+    sri_document_id?: string;
+    motivo?: string;
+    void_payments?: boolean;
+  };
+
+  if (!organization_id || !sri_document_id) throw new Error('Falta organization_id o sri_document_id.');
+  if (!motivo || !motivo.trim()) throw new Error('El motivo de la nota de crédito es obligatorio.');
+
+  // 1. Gates de plan y configuración SRI — idénticos a handleEmit.
+  const { data: subscription, error: subError } = await supabaseClient
+    .from('subscriptions')
+    .select('plan_id')
+    .eq('organization_id', organization_id)
+    .maybeSingle();
+  if (subError) throw subError;
+  if (!subscription?.plan_id) {
+    return jsonResponse({ error: 'Este centro no tiene un plan de suscripción activo.' }, 403);
+  }
+
+  const { data: plan, error: planError } = await supabaseClient
+    .from('subscription_plans')
+    .select('features')
+    .eq('id', subscription.plan_id)
+    .maybeSingle();
+  if (planError) throw planError;
+
+  const hasElectronicBilling = Boolean((plan?.features as any)?.has_electronic_billing);
+  if (!hasElectronicBilling) {
+    return jsonResponse({ error: 'Este centro no tiene habilitada la facturación electrónica en su plan.' }, 403);
+  }
+
+  const { data: sriConfig, error: sriConfigError } = await supabaseClient
+    .from('sri_configurations')
+    .select('establecimiento, punto_emision, cert_uploaded_at, sri_api_emisor_id')
+    .eq('organization_id', organization_id)
+    .maybeSingle();
+  if (sriConfigError) throw sriConfigError;
+  if (!sriConfig?.cert_uploaded_at || !sriConfig.sri_api_emisor_id) {
+    return jsonResponse(
+      { error: 'Debes subir la firma electrónica (.p12) en Configuración antes de poder facturar.' },
+      403
+    );
+  }
+
+  // 2. Resolver y validar la factura original — filtro explícito de
+  // organization_id (nunca confiar en el sri_document_id del cliente sin
+  // verificar pertenencia). El trigger validate_credit_note_link (BD)
+  // repite este chequeo como backstop independiente al insertar.
+  const { data: originalDoc, error: origError } = await supabaseClient
+    .from('sri_documents')
+    .select('*')
+    .eq('id', sri_document_id)
+    .eq('organization_id', organization_id)
+    .maybeSingle();
+  if (origError) throw origError;
+  if (!originalDoc) throw new Error('Factura no encontrada en este centro.');
+  if (originalDoc.document_type !== '01') {
+    throw new Error('Solo se puede emitir una nota de crédito sobre una factura.');
+  }
+  if (originalDoc.status !== 'AUTHORIZED') {
+    throw new Error('Solo se puede emitir una nota de crédito sobre una factura autorizada por el SRI.');
+  }
+  if (!originalDoc.clave_acceso || originalDoc.clave_acceso.length !== 49) {
+    throw new Error('La factura original no tiene una clave de acceso válida.');
+  }
+
+  const { data: existingCreditNote } = await supabaseClient
+    .from('sri_documents')
+    .select('id')
+    .eq('documento_modificado_id', originalDoc.id)
+    .eq('document_type', '04')
+    .eq('status', 'AUTHORIZED')
+    .maybeSingle();
+  if (existingCreditNote) throw new Error('Esta factura ya tiene una nota de crédito autorizada.');
+
+  // 3. Emisor fresco (igual que handleEmit) — el certificado/emisor activo
+  // debe coincidir con el vigente ahora, no con el de cuando se emitió la
+  // factura original.
+  const { data: org, error: orgError } = await supabaseClient
+    .from('organizations')
+    .select('ruc, name, address, city')
+    .eq('id', organization_id)
+    .maybeSingle();
+  if (orgError) throw orgError;
+  if (!org?.ruc) {
+    return jsonResponse({ error: 'Este centro no tiene un RUC configurado en Configuración > Datos del Centro.' }, 400);
+  }
+  const mainAddress = [org.address, org.city].filter(Boolean).join(', ') || 'Ecuador';
+
+  // 4. Comprador e impuestos: snapshot CONGELADO de la factura original
+  // (nunca datos en vivo del representante ni el régimen actual del
+  // centro) — mismo principio ya usado en handleRetry, para que el
+  // desglose cierre exacto contra la factura que esta nota reversa.
+  const total = Number(originalDoc.total);
+  const tax = computeSriInvoiceTax(total, originalDoc.regimen_fiscal_aplicado);
+  const isConsumidorFinal = originalDoc.cliente_identificacion === '9999999999999';
+  const customer = {
+    tipoIdentificacion: isConsumidorFinal ? '07' : '05',
+    identificacion: originalDoc.cliente_identificacion as string,
+    razonSocial: originalDoc.cliente_razon_social || (isConsumidorFinal ? 'Consumidor Final' : 'Cliente'),
+    direccion: org.address || 'Ecuador',
+    email: originalDoc.cliente_email || undefined,
+  };
+
+  const ambiente = originalDoc.environment_aplicado === 'produccion' ? '2' : '1';
+  const documentNumber = formatSriDocumentNumber(originalDoc.clave_acceso);
+  const trimmedMotivo = motivo.trim();
+  const lineDescription = `Anulación: ${trimmedMotivo}`;
+
+  const creditNotePayload = {
+    ambiente,
+    fechaEmision: formatFechaEmisionSri(new Date()),
+    emisor: {
+      ruc: org.ruc,
+      razonSocial: org.name,
+      nombreComercial: org.name,
+      dirMatriz: mainAddress,
+      dirEstablecimiento: mainAddress,
+      establecimiento: sriConfig.establecimiento,
+      puntoEmision: sriConfig.punto_emision,
+      obligadoContabilidad: 'NO',
+      contribuyenteRimpe: tax.contribuyenteRimpe,
+    },
+    comprador: customer,
+    codDocModificado: '01', // Factura
+    numDocModificado: documentNumber,
+    fechaEmisionDocSustento: formatFechaEmisionSri(new Date(originalDoc.fecha_emision)),
+    motivo: trimmedMotivo,
+    detalles: [
+      {
+        codigoPrincipal: 'SERVICIO',
+        descripcion: lineDescription,
+        cantidad: 1,
+        precioUnitario: tax.baseImponible,
+        descuento: 0,
+        impuestos: [{ codigo: tax.codigo, codigoPorcentaje: tax.codigoPorcentaje, tarifa: tax.tarifa, baseImponible: tax.baseImponible, valor: tax.valor }],
+      },
+    ],
+  };
+
+  // Igual que en la emisión de factura: nunca se reintenta a ciegas ante
+  // una excepción de red en esta llamada (muta estado fiscal real).
+  const { ok, data: creditNoteResult } = await sriApiFetch('/sri/emitir/nota-credito', {
+    method: 'POST',
+    body: JSON.stringify(creditNotePayload),
+  }, { retryOnNetworkError: false });
+
+  if (!ok || !creditNoteResult.success) {
+    const errMsg = extractSriApiErrorMessage(creditNoteResult);
+    return jsonResponse({ error: errMsg }, 400);
+  }
+
+  const documentId = crypto.randomUUID();
+  const isAuthorized = creditNoteResult.estado === 'AUTORIZADO';
+
+  // 5. Persistir de inmediato — antes de anular pagos o generar RIDE/correo.
+  const { error: insertError } = await supabaseClient.from('sri_documents').insert({
+    id: documentId,
+    organization_id,
+    document_type: '04',
+    documento_modificado_id: originalDoc.id,
+    motivo: trimmedMotivo,
+    status: isAuthorized ? 'AUTHORIZED' : 'REJECTED',
+    secuencial: extractSecuencial(creditNoteResult.claveAcceso),
+    clave_acceso: creditNoteResult.claveAcceso,
+    total,
+    cliente_identificacion: customer.identificacion,
+    cliente_razon_social: customer.razonSocial,
+    cliente_email: customer.email ?? null,
+    regimen_fiscal_aplicado: originalDoc.regimen_fiscal_aplicado,
+    environment_aplicado: originalDoc.environment_aplicado,
+    authorization_number: creditNoteResult.numeroAutorizacion ?? null,
+    authorization_date: creditNoteResult.fechaAutorizacion ?? null,
+    xml_url: null,
+    pdf_url: null,
+    email_sent_at: null,
+    email_sent_to: null,
+  });
+  if (insertError) throw insertError;
+
+  if (!isAuthorized) {
+    return jsonResponse({ error: extractSriApiErrorMessage(creditNoteResult), sri_document_id: documentId }, 400);
+  }
+
+  // 6. Anular los pagos de la factura original — con supabaseClient (NO
+  // adminClient), para que el trigger prevent_void_payment_with_
+  // authorized_invoice capture el usuario real en voided_by
+  // (auth.uid() es NULL bajo service role). Alcance: solo los
+  // internal_payments de ESTA factura — nunca charges.status='void'
+  // directamente (sin UI ni columnas de auditoría hoy, fuera de alcance).
+  let paymentsVoidedCount = 0;
+  if (void_payments !== false) {
+    const { data: voidedRows, error: voidError } = await supabaseClient
+      .from('internal_payments')
+      .update({
+        voided_at: new Date().toISOString(),
+        voided_reason: `Nota de crédito ${creditNoteResult.claveAcceso}`,
+      })
+      .eq('sri_document_id', originalDoc.id)
+      .is('voided_at', null)
+      .select('id');
+    if (voidError) {
+      console.error('Error anulando pagos tras la nota de crédito:', voidError.message);
+    } else {
+      paymentsVoidedCount = voidedRows?.length ?? 0;
+    }
+  }
+
+  // 7. RIDE + correo, best-effort — igual que handleEmit. La nota de
+  // crédito ya quedó autorizada y registrada arriba; un fallo aquí solo
+  // pierde el enriquecimiento (PDF/XML/envío).
+  let pdfUrl: string | null = null;
+  let xmlUrl: string | null = null;
+  let emailSentAt: string | null = null;
+  let emailSentTo: string | null = null;
+  let emailStatus: 'sent' | 'no_email' | 'not_configured' | 'failed' = 'no_email';
+  const xmlContentForEmail: string | null = creditNoteResult.xmlAutorizado ?? null;
+
+  let pdfBytes: Uint8Array | null = null;
+  try {
+    pdfBytes = await callRideService({
+      accessKey: creditNoteResult.claveAcceso,
+      authorizationNumber: creditNoteResult.numeroAutorizacion,
+      authorizationDate: creditNoteResult.fechaAutorizacion,
+      documentType: '04',
+      modifiedDocument: {
+        documentNumber,
+        issueDate: originalDoc.fecha_emision,
+        reason: trimmedMotivo,
+      },
+      issuer: {
+        ruc: org.ruc,
+        socialReason: org.name,
+        mainAddress,
+        rimpeType: tax.contribuyenteRimpe,
+        environment: ambiente === '2' ? 2 : 1,
+      },
+      customer: {
+        identificationType: customer.tipoIdentificacion === '05' ? 5 : 7,
+        identificationNumber: customer.identificacion,
+        socialReason: customer.razonSocial,
+        address: customer.direccion,
+        email: customer.email,
+      },
+      lines: [
+        {
+          itemCode: 'SERVICIO',
+          description: lineDescription,
+          quantity: 1,
+          unitPrice: tax.baseImponible,
+          discount: 0,
+          taxes: [{ percentageCode: tax.codigoPorcentaje, rate: tax.tarifa, taxableBase: tax.baseImponible, taxAmount: tax.valor }],
+        },
+      ],
+      payments: [{ paymentMethod: 1, total }],
+    });
+  } catch (rideError: any) {
+    console.error('Error generando el RIDE de la nota de crédito:', rideError.message);
+  }
+
+  const [storageOutcome, emailOutcome] = await Promise.allSettled([
+    (async () => {
+      if (!pdfBytes) return;
+      const bytes = pdfBytes;
+      const pdfPath = `${organization_id}/${documentId}.pdf`;
+      const { error: pdfUploadError } = await adminClient.storage
+        .from('sri-documents')
+        .upload(pdfPath, bytes, { contentType: 'application/pdf', upsert: false });
+      if (pdfUploadError) throw pdfUploadError;
+      pdfUrl = pdfPath;
+
+      if (xmlContentForEmail) {
+        const xmlPath = `${organization_id}/${documentId}.xml`;
+        const { error: xmlUploadError } = await adminClient.storage
+          .from('sri-documents')
+          .upload(xmlPath, new TextEncoder().encode(xmlContentForEmail), { contentType: 'application/xml', upsert: false });
+        if (!xmlUploadError) xmlUrl = xmlPath;
+      }
+    })(),
+    (async () => {
+      if (!customer.email) { emailStatus = 'no_email'; return; }
+      const brevoConfig = await getBrevoConfig(adminClient);
+      if (!brevoConfig) { emailStatus = 'not_configured'; return; }
+      await sendInvoiceEmail({
+        config: brevoConfig,
+        to: customer.email,
+        customerName: customer.razonSocial,
+        organizationName: org.name,
+        claveAcceso: creditNoteResult.claveAcceso,
+        total,
+        pdfBytes,
+        xmlContent: xmlContentForEmail,
+        isCreditNote: true,
+      });
+      emailSentAt = new Date().toISOString();
+      emailSentTo = customer.email;
+      emailStatus = 'sent';
+    })(),
+  ]);
+  if (storageOutcome.status === 'rejected') {
+    console.error('Error guardando el RIDE de la nota de crédito:', (storageOutcome.reason as any)?.message ?? storageOutcome.reason);
+  }
+  if (emailOutcome.status === 'rejected') {
+    console.error('Error enviando la nota de crédito por correo:', (emailOutcome.reason as any)?.message ?? emailOutcome.reason);
+    emailStatus = 'failed';
+  }
+
+  if (pdfUrl || xmlUrl || emailSentAt) {
+    const { error: enrichError } = await supabaseClient
+      .from('sri_documents')
+      .update({
+        ...(pdfUrl ? { pdf_url: pdfUrl } : {}),
+        ...(xmlUrl ? { xml_url: xmlUrl } : {}),
+        ...(emailSentAt ? { email_sent_at: emailSentAt, email_sent_to: emailSentTo } : {}),
+      })
+      .eq('id', documentId);
+    if (enrichError) console.error('Error guardando enriquecimiento de la nota de crédito:', enrichError.message);
+  }
+
+  return jsonResponse({
+    success: true,
+    sri_document_id: documentId,
+    clave_acceso: creditNoteResult.claveAcceso,
+    total,
+    email_status: emailStatus,
+    payments_voided_count: paymentsVoidedCount,
+  });
 }
 
 // ─── Retry a previously REJECTED/ERROR document ────────────────────────────
@@ -721,14 +1082,34 @@ async function handleRetry(
 
   const { data: doc, error: docError } = await supabaseClient
     .from('sri_documents')
-    .select('id, clave_acceso, status, total, cliente_identificacion, cliente_razon_social, cliente_email, regimen_fiscal_aplicado, environment_aplicado, email_sent_at')
+    .select('id, clave_acceso, status, total, cliente_identificacion, cliente_razon_social, cliente_email, regimen_fiscal_aplicado, environment_aplicado, email_sent_at, document_type, documento_modificado_id, motivo')
     .eq('id', sri_document_id)
     .eq('organization_id', organization_id)
     .maybeSingle();
   if (docError) throw docError;
-  if (!doc) throw new Error('Factura no encontrada en este centro.');
+  if (!doc) throw new Error('Comprobante no encontrado en este centro.');
   if (doc.status !== 'REJECTED' && doc.status !== 'ERROR') {
-    throw new Error(`Solo se pueden reintentar facturas rechazadas o con error (estado actual: ${doc.status}).`);
+    throw new Error(`Solo se pueden reintentar comprobantes rechazados o con error (estado actual: ${doc.status}).`);
+  }
+
+  // Si es una nota de crédito, el RIDE regenerado más abajo necesita el
+  // mismo bloque "documento modificado" que llevó al emitirla la primera
+  // vez — sin esto, un reintento autorizado la regeneraría como si fuera
+  // una Factura (ver DocumentType.Invoice, el default de RidePdfGenerator).
+  let creditNoteModifiedDoc: { documentNumber: string; issueDate: string; reason: string } | null = null;
+  if (doc.document_type === '04' && doc.documento_modificado_id) {
+    const { data: originalForRetry } = await supabaseClient
+      .from('sri_documents')
+      .select('clave_acceso, fecha_emision')
+      .eq('id', doc.documento_modificado_id)
+      .maybeSingle();
+    if (originalForRetry) {
+      creditNoteModifiedDoc = {
+        documentNumber: formatSriDocumentNumber(originalForRetry.clave_acceso),
+        issueDate: originalForRetry.fecha_emision,
+        reason: doc.motivo || '',
+      };
+    }
   }
 
   // Igual que en la emisión: nunca se reintenta a ciegas ante una
@@ -819,6 +1200,8 @@ async function handleRetry(
         accessKey: doc.clave_acceso,
         authorizationNumber,
         authorizationDate,
+        documentType: doc.document_type,
+        modifiedDocument: creditNoteModifiedDoc,
         issuer: {
           ruc: org.ruc,
           socialReason: org.name,
@@ -884,6 +1267,7 @@ async function handleRetry(
             total,
             pdfBytes,
             xmlContent: xmlAutorizado,
+            isCreditNote: doc.document_type === '04',
           });
           emailSentAt = new Date().toISOString();
           emailSentTo = customer.email;
@@ -939,14 +1323,14 @@ async function handleResendEmail(
 
   const { data: doc, error: docError } = await supabaseClient
     .from('sri_documents')
-    .select('id, status, clave_acceso, total, cliente_razon_social, cliente_email, pdf_url, xml_url')
+    .select('id, status, clave_acceso, total, cliente_razon_social, cliente_email, pdf_url, xml_url, document_type')
     .eq('id', sri_document_id)
     .eq('organization_id', organization_id)
     .maybeSingle();
   if (docError) throw docError;
-  if (!doc) throw new Error('Factura no encontrada en este centro.');
+  if (!doc) throw new Error('Comprobante no encontrado en este centro.');
   if (doc.status !== 'AUTHORIZED') {
-    return jsonResponse({ error: 'Solo se puede reenviar el correo de facturas autorizadas por el SRI.' }, 400);
+    return jsonResponse({ error: 'Solo se puede reenviar el correo de comprobantes autorizados por el SRI.' }, 400);
   }
   if (!doc.pdf_url && !doc.xml_url) {
     return jsonResponse({ error: 'Este comprobante no tiene RIDE ni XML disponibles para adjuntar.' }, 400);
@@ -1014,6 +1398,7 @@ async function handleResendEmail(
       total: Number(doc.total),
       pdfBytes,
       xmlContent,
+      isCreditNote: doc.document_type === '04',
     });
   } catch (emailError: any) {
     return jsonResponse({ error: 'No se pudo reenviar el correo: ' + emailError.message }, 502);

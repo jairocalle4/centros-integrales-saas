@@ -702,7 +702,7 @@ export function BeneficiaryDetailPage() {
       // Charges with their full payment history
       const { data: chargesData } = await supabase
         .from('charges')
-        .select('*, internal_payments(*, sri_documents ( status, pdf_url, cliente_email, email_sent_at ))')
+        .select('*, internal_payments(*, sri_documents ( status, pdf_url, cliente_email, email_sent_at, clave_acceso, total ))')
         .eq('beneficiary_id', id)
         .order('created_at', { ascending: false });
 

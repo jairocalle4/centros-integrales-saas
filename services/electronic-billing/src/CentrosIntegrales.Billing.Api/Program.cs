@@ -1,4 +1,5 @@
 using CentrosIntegrales.Billing.Domain.Contracts;
+using CentrosIntegrales.Billing.Domain.Enums;
 using CentrosIntegrales.Billing.Domain.Interfaces;
 using CentrosIntegrales.Billing.Domain.Models;
 using CentrosIntegrales.Billing.Infrastructure.Pdf;
@@ -62,7 +63,11 @@ app.MapPost("/api/v1/ride/generate", (HttpRequest httpRequest, RideGenerationReq
         AuthorizationDate = request.AuthorizationDate,
     };
 
-    var pdfBytes = rideGenerator.GenerateRidePdf(document, request.Issuer, request.Customer, request.Lines, request.Payments, logoBytes);
+    // "01"/"04" — mismo formato de 2 dígitos que ya usa sri_documents.document_type
+    // en Supabase, para no mantener una tabla de mapeo separada.
+    var documentType = request.DocumentType == "04" ? DocumentType.CreditNote : DocumentType.Invoice;
+
+    var pdfBytes = rideGenerator.GenerateRidePdf(document, request.Issuer, request.Customer, request.Lines, request.Payments, logoBytes, documentType, request.ModifiedDocument);
     return Results.File(pdfBytes, "application/pdf", $"RIDE-{request.AccessKey}.pdf");
 })
 .WithName("GenerateRide");
@@ -89,4 +94,8 @@ public class RideGenerationRequest
     public required List<PaymentDetail> Payments { get; set; }
     [JsonPropertyName("logoBase64")]
     public string? LogoBase64 { get; set; }
+    [JsonPropertyName("documentType")]
+    public string DocumentType { get; set; } = "01"; // "01" factura (default), "04" nota de crédito
+    [JsonPropertyName("modifiedDocument")]
+    public ModifiedDocumentData? ModifiedDocument { get; set; }
 }

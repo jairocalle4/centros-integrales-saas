@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { X, Receipt, Plus, Calendar, DollarSign, CreditCard, Download, Send, Loader2, FileCheck, RotateCcw, FileX, Mail, Ban } from 'lucide-react';
+import { X, Receipt, Plus, Calendar, DollarSign, CreditCard, Download, Send, Loader2, FileCheck, RotateCcw, FileX, FileMinus, Mail, Ban } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
 import { toWhatsAppNumber } from '../../lib/phone';
 import { downloadReceiptPdf, uploadReceiptAndGetSignedUrl } from './ReceiptDocument';
 import type { ReceiptOrganization } from './ReceiptDocument';
+import { CreditNoteModal } from './CreditNoteModal';
 
 export type Payment = {
   id: string;
@@ -17,7 +18,14 @@ export type Payment = {
   reference: string | null;
   notes?: string | null;
   sri_document_id?: string | null;
-  sri_documents?: { status: string; pdf_url: string | null; cliente_email: string | null; email_sent_at: string | null } | null;
+  sri_documents?: {
+    status: string;
+    pdf_url: string | null;
+    cliente_email: string | null;
+    email_sent_at: string | null;
+    clave_acceso?: string | null;
+    total?: number | null;
+  } | null;
   voided_at?: string | null;
   voided_reason?: string | null;
 };
@@ -44,11 +52,40 @@ export async function voidPayment(paymentId: string, reason?: string): Promise<b
 }
 
 // ─── Factura electrónica: badge + "Ver factura" / "Reintentar" / correo ───
-// Compartido entre el historial de pagos de este modal y el módulo de
-// Facturas — un pago solo tiene esto si alguna vez se intentó facturar
-// (sri_document_id no nulo), sea que haya quedado autorizada o rechazada.
+// Compartido entre el historial de pagos de este modal, el módulo de
+// Facturas y FacturasModule — un pago solo tiene esto si alguna vez se
+// intentó facturar (sri_document_id no nulo), sea que haya quedado
+// autorizada o rechazada. documentType/hasAuthorizedCreditNote son
+// opcionales y retrocompatibles (default '01'/false) para no romper
+// ningún uso existente que solo pasaba `status`.
 
-export function InvoiceStatusBadge({ status }: { status: string }) {
+export function InvoiceStatusBadge({
+  status,
+  documentType = '01',
+  hasAuthorizedCreditNote = false,
+}: {
+  status: string;
+  documentType?: string;
+  hasAuthorizedCreditNote?: boolean;
+}) {
+  if (documentType === '04') {
+    return status === 'AUTHORIZED' ? (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200">
+        <FileMinus className="w-3 h-3" /> Nota de Crédito
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-red-700 bg-red-50 border border-red-200">
+        <FileX className="w-3 h-3" /> Nota de Crédito rechazada
+      </span>
+    );
+  }
+  if (status === 'AUTHORIZED' && hasAuthorizedCreditNote) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200">
+        <FileMinus className="w-3 h-3" /> Anulada (N. Crédito)
+      </span>
+    );
+  }
   if (status === 'AUTHORIZED') {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200">
@@ -149,6 +186,34 @@ export async function resendInvoiceEmail(organizationId: string, sriDocumentId: 
   return true;
 }
 
+// Anula (100% del monto) una factura AUTHORIZED emitiendo una Nota de
+// Crédito ante el SRI — ver handleEmitCreditNote en la Edge Function.
+// void_payments controla si además se anulan los internal_payments
+// vinculados a esa factura (por defecto sí, desde CreditNoteModal).
+export async function issueCreditNote(
+  organizationId: string,
+  sriDocumentId: string,
+  motivo: string,
+  voidPayments: boolean
+): Promise<boolean> {
+  const { data, error } = await supabase.functions.invoke('electronic-billing', {
+    body: {
+      action: 'credit_note',
+      organization_id: organizationId,
+      sri_document_id: sriDocumentId,
+      motivo,
+      void_payments: voidPayments,
+    },
+  });
+  if (error || (data as any)?.error) {
+    const message = await extractEdgeFunctionError(data, error);
+    toast.error('No se pudo emitir la nota de crédito: ' + message, { duration: 7000 });
+    return false;
+  }
+  toast.success('Nota de crédito emitida y autorizada por el SRI.');
+  return true;
+}
+
 export type PrimaryRepresentative = { id: string; name: string; phone: string | null; identification: string | null };
 
 export async function fetchPrimaryRepresentative(beneficiaryId: string): Promise<PrimaryRepresentative | null> {
@@ -213,6 +278,8 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [creditedDocumentIds, setCreditedDocumentIds] = useState<Set<string>>(new Set());
+  const [creditNoteTarget, setCreditNoteTarget] = useState<{ sriDocumentId: string; claveAcceso: string; total: number } | null>(null);
 
   const handleVoidPayment = async (payment: Payment) => {
     const confirmed = window.confirm(
@@ -247,6 +314,11 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
     }
   };
 
+  const handleCreditNoteIssued = () => {
+    setCreditNoteTarget(null);
+    onInvoiceChanged?.();
+  };
+
   // Hooks must run unconditionally on every render — the early return below
   // (this modal stays mounted and toggles via `isOpen`) can't come before them.
   useEffect(() => {
@@ -265,6 +337,33 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
 
     return () => { cancelled = true; };
   }, [isOpen, beneficiaryId]);
+
+  // Qué facturas AUTHORIZED de este historial ya tienen una nota de
+  // crédito AUTHORIZED — determina si el botón de anular pago sigue
+  // bloqueado o si ya se puede (ver prevent_void_payment_with_authorized_
+  // invoice, migración 20260902110000) y si se ofrece emitir una.
+  useEffect(() => {
+    if (!isOpen) { setCreditedDocumentIds(new Set()); return; }
+    const authorizedIds = [...new Set(
+      payments
+        .filter(p => p.sri_document_id && p.sri_documents?.status === 'AUTHORIZED')
+        .map(p => p.sri_document_id as string)
+    )];
+    if (authorizedIds.length === 0) { setCreditedDocumentIds(new Set()); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('sri_documents')
+        .select('documento_modificado_id')
+        .eq('document_type', '04')
+        .eq('status', 'AUTHORIZED')
+        .in('documento_modificado_id', authorizedIds);
+      if (!cancelled) {
+        setCreditedDocumentIds(new Set((data ?? []).map((d: any) => d.documento_modificado_id).filter(Boolean)));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, payments]);
 
   if (!isOpen || !charge) return null;
 
@@ -293,6 +392,7 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   };
 
   return (
+    <>
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
 
@@ -393,6 +493,11 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
 
                   const isVoided = Boolean(payment.voided_at);
                   const hasAuthorizedInvoice = payment.sri_document_id && payment.sri_documents?.status === 'AUTHORIZED';
+                  const hasAuthorizedCreditNote = Boolean(payment.sri_document_id && creditedDocumentIds.has(payment.sri_document_id));
+                  // Bloquea anular solo mientras la factura autorizada no tenga
+                  // todavía una nota de crédito que la respalde — igual que el
+                  // trigger de la base de datos (20260902110000).
+                  const blockedByInvoiceWithoutCreditNote = Boolean(hasAuthorizedInvoice) && !hasAuthorizedCreditNote;
 
                   return (
                     <div key={payment.id} className={`flex flex-wrap items-center justify-between gap-3 gap-y-2 p-3 rounded-xl bg-white border shadow-sm transition-colors ${isVoided ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'}`}>
@@ -422,7 +527,7 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                               </span>
                             )}
                             {payment.sri_document_id && payment.sri_documents && (
-                              <InvoiceStatusBadge status={payment.sri_documents.status} />
+                              <InvoiceStatusBadge status={payment.sri_documents.status} hasAuthorizedCreditNote={hasAuthorizedCreditNote} />
                             )}
                           </div>
                         </div>
@@ -470,6 +575,19 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                               {retryingId === payment.sri_document_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
                             </button>
                           )}
+                          {blockedByInvoiceWithoutCreditNote && (
+                            <button
+                              onClick={() => setCreditNoteTarget({
+                                sriDocumentId: payment.sri_document_id!,
+                                claveAcceso: payment.sri_documents!.clave_acceso ?? '',
+                                total: payment.sri_documents!.total ?? Number(payment.amount),
+                              })}
+                              title="Anular esta factura con una Nota de Crédito"
+                              className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <FileMinus className="w-4 h-4" />
+                            </button>
+                          )}
 
                           <button
                             onClick={handleDownload}
@@ -513,8 +631,8 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                           {!isVoided && (
                             <button
                               onClick={() => handleVoidPayment(payment)}
-                              disabled={voidingId === payment.id || Boolean(hasAuthorizedInvoice)}
-                              title={hasAuthorizedInvoice ? 'No se puede anular — tiene una factura autorizada por el SRI' : 'Anular este pago'}
+                              disabled={voidingId === payment.id || blockedByInvoiceWithoutCreditNote}
+                              title={blockedByInvoiceWithoutCreditNote ? 'No se puede anular — emite primero una Nota de Crédito' : 'Anular este pago'}
                               className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors disabled:opacity-30 cursor-pointer"
                             >
                               {voidingId === payment.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
@@ -553,6 +671,18 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
 
       </div>
     </div>
+    {creditNoteTarget && (
+      <CreditNoteModal
+        isOpen={Boolean(creditNoteTarget)}
+        onClose={() => setCreditNoteTarget(null)}
+        organizationId={organization.id}
+        sriDocumentId={creditNoteTarget.sriDocumentId}
+        claveAcceso={creditNoteTarget.claveAcceso}
+        total={creditNoteTarget.total}
+        onIssued={handleCreditNoteIssued}
+      />
+    )}
+    </>
   );
 }
 

@@ -113,7 +113,7 @@ export function CobrosModule() {
       // Load internal payments to sum paid amounts per charge
       const { data: pmtsData } = await supabase
         .from('internal_payments')
-        .select('*, sri_documents ( status, pdf_url, cliente_email, email_sent_at )')
+        .select('*, sri_documents ( status, pdf_url, cliente_email, email_sent_at, clave_acceso, total )')
         .eq('organization_id', currentOrg.id)
         .order('payment_date', { ascending: false });
 

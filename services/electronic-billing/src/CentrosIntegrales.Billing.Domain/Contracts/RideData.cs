@@ -57,3 +57,13 @@ public class PaymentDetail
     public int TimeLimit { get; set; } = 0;
     public string TimeUnit { get; set; } = "dias";
 }
+
+// Solo aplica a una Nota de Crédito (DocumentType.CreditNote): identifica
+// la factura que esta nota modifica. El RIDE real de una nota de crédito
+// debe mostrar este bloque; una Factura nunca lo lleva.
+public class ModifiedDocumentData
+{
+    public required string DocumentNumber { get; set; } // ej. "001-001-000000123"
+    public required DateTime IssueDate { get; set; }
+    public required string Reason { get; set; } // motivo de la nota de crédito
+}

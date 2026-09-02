@@ -13,3 +13,9 @@ Tras analizar el ERP existente del usuario (`ERP-STORE-FAST-ConFirmaElectronica`
 
 ## Restricciones
 Nunca exponer certificados `.p12`, contraseñas de la firma, ni el JWT/API key de estos servicios al cliente o en logs/prompts.
+
+## Tipos de documento soportados
+- **Factura** (`document_type = '01'`): el flujo original, `handleEmit`/`handleRetry`.
+- **Nota de Crédito** (`document_type = '04'`): anula el 100% de una factura ya `AUTHORIZED` (sin soporte de montos parciales) — `handleEmitCreditNote`, endpoint externo `/sri/emitir/nota-credito` (`CreateNotaCreditoDto`/`NotaCreditoResponseDto`, verificado contra `${SRI_API_URL}/api-json` antes de implementar). `sri_documents.documento_modificado_id` vincula la nota a la factura que modifica; los triggers `prevent_void_charge_with_authorized_invoice`/`prevent_void_payment_with_authorized_invoice` solo desbloquean la anulación del cargo/pago original cuando existe una nota de crédito `AUTHORIZED` vinculada.
+- **Nota de Débito, Guía de Remisión, Retención**: no implementadas — el mismo endpoint externo también expone `/sri/emitir/nota-debito`, pero no se construyó (decisión explícita del usuario, fuera de alcance).
+- El RIDE (`services/electronic-billing`) recibe `documentType` ('01'/'04') y, para notas de crédito, `modifiedDocument` (número/fecha/motivo de la factura original) — ver `RidePdfGenerator.cs`.

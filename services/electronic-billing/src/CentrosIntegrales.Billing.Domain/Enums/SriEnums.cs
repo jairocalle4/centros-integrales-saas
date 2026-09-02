@@ -32,3 +32,13 @@ public enum PaymentMethod
     OtrosConUtilizacionSistemaFinanciero = 20,
     EndosoDeCheques = 21
 }
+
+// Tipo de comprobante SRI que se está renderizando en el RIDE — hoy solo
+// Factura y Nota de Crédito tienen soporte real (Nota de Débito, Guía de
+// Remisión y Retención no están implementadas en ningún punto del
+// sistema todavía).
+public enum DocumentType
+{
+    Invoice,     // Factura, código SRI '01'
+    CreditNote,  // Nota de Crédito, código SRI '04'
+}

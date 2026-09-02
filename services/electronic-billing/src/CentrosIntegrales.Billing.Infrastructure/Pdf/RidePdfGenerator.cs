@@ -16,10 +16,19 @@ public class RidePdfGenerator : IRideGenerator
         QuestPDF.Settings.License = LicenseType.Community;
     }
 
-    public byte[] GenerateRidePdf(AuthorizedElectronicDocument document, IssuerData issuer, CustomerData customer, List<InvoiceLine> lines, List<PaymentDetail> payments, byte[]? logoBytes)
+    public byte[] GenerateRidePdf(
+        AuthorizedElectronicDocument document,
+        IssuerData issuer,
+        CustomerData customer,
+        List<InvoiceLine> lines,
+        List<PaymentDetail> payments,
+        byte[]? logoBytes,
+        DocumentType documentType = DocumentType.Invoice,
+        ModifiedDocumentData? modifiedDocument = null)
     {
         var qrCodeBytes = GenerateQrCodeBytes(document.AccessKey ?? string.Empty);
         var accessKeyFormatted = FormatAccessKey(document.AccessKey ?? string.Empty);
+        var documentTitle = documentType == DocumentType.CreditNote ? "NOTA DE CRÉDITO" : "FACTURA";
 
         var pdfDoc = Document.Create(container =>
         {
@@ -62,7 +71,7 @@ public class RidePdfGenerator : IRideGenerator
                         row.RelativeItem(5).Border(1).BorderColor(Colors.Grey.Lighten1).Padding(10).Column(col =>
                         {
                             col.Item().Text($"R.U.C.: {issuer.Ruc}").Bold().FontSize(11);
-                            col.Item().Text("FACTURA").Bold().FontSize(14);
+                            col.Item().Text(documentTitle).Bold().FontSize(14);
                             col.Item().Text($"No. {document.AccessKey?.Substring(24, 3)}-{document.AccessKey?.Substring(27, 3)}-{document.AccessKey?.Substring(30, 9)}").FontSize(10);
                             col.Item().Text($"NÚMERO DE AUTORIZACIÓN:").Bold().FontSize(8);
                             col.Item().Text(document.AuthorizationNumber ?? document.AccessKey).FontSize(7);
@@ -98,6 +107,25 @@ public class RidePdfGenerator : IRideGenerator
                     });
 
                     col.Item().PaddingVertical(10);
+
+                    // Documento(s) modificado(s) — solo Nota de Crédito. El RIDE
+                    // real de una nota de crédito SRI debe identificar la factura
+                    // que reversa; una Factura nunca lleva este bloque.
+                    if (documentType == DocumentType.CreditNote && modifiedDocument != null)
+                    {
+                        col.Item().Border(1).BorderColor(Colors.Grey.Lighten1).Padding(8).Column(mc =>
+                        {
+                            mc.Item().Text("DOCUMENTO(S) MODIFICADO(S)").Bold().FontSize(8);
+                            mc.Item().Row(r =>
+                            {
+                                r.RelativeItem(5).Text($"Comprobante: FACTURA No. {modifiedDocument.DocumentNumber}").FontSize(8);
+                                r.RelativeItem(3).Text($"Fecha Emisión: {modifiedDocument.IssueDate:dd/MM/yyyy}").FontSize(8);
+                            });
+                            mc.Item().Text($"Motivo: {modifiedDocument.Reason}").FontSize(8);
+                        });
+
+                        col.Item().PaddingVertical(10);
+                    }
 
                     // Lines Table
                     col.Item().Table(table =>

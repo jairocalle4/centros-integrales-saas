@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
-import { FileText, FileCheck, RotateCcw, Loader2, Search, Mail } from 'lucide-react';
+import { FileText, FileCheck, RotateCcw, Loader2, Search, Mail, FileMinus } from 'lucide-react';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
 import { InvoiceStatusBadge, openInvoicePdf, retryInvoice, resendInvoiceEmail } from './PaymentDetailModal';
+import { CreditNoteModal } from './CreditNoteModal';
 import { SkeletonTable } from '../../components/ui/Skeleton';
 
 type SriDocumentRow = {
@@ -18,6 +19,8 @@ type SriDocumentRow = {
   authorization_date: string | null;
   pdf_url: string | null;
   created_at: string;
+  document_type: string;
+  documento_modificado_id: string | null;
   internal_payments: { charges: { description: string } | null }[] | null;
 };
 
@@ -38,6 +41,13 @@ export function FacturasModule() {
   const [dateTo, setDateTo] = useState('');
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
+  const [creditNoteTarget, setCreditNoteTarget] = useState<SriDocumentRow | null>(null);
+
+  // Ya están todas las sri_documents de este centro en `documents` (esta
+  // tabla no filtra por document_type) — no hace falta una consulta
+  // aparte para saber si una factura ya tiene su nota de crédito.
+  const hasAuthorizedCreditNote = (docId: string) =>
+    documents.some(d => d.document_type === '04' && d.status === 'AUTHORIZED' && d.documento_modificado_id === docId);
 
   const loadDocuments = useCallback(async () => {
     if (!currentOrg) return;
@@ -46,7 +56,7 @@ export function FacturasModule() {
       const { data, error } = await (supabase as any)
         .from('sri_documents')
         .select(
-          'id, status, clave_acceso, total, cliente_identificacion, cliente_razon_social, cliente_email, authorization_number, authorization_date, pdf_url, created_at, internal_payments ( charges ( description ) )'
+          'id, status, clave_acceso, total, cliente_identificacion, cliente_razon_social, cliente_email, authorization_number, authorization_date, pdf_url, created_at, document_type, documento_modificado_id, internal_payments ( charges ( description ) )'
         )
         .eq('organization_id', currentOrg.id)
         .order('created_at', { ascending: false });
@@ -104,6 +114,7 @@ export function FacturasModule() {
   });
 
   return (
+    <>
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Facturas Electrónicas</h1>
@@ -199,7 +210,11 @@ export function FacturasModule() {
                   <td className="px-4 py-3 text-slate-600">{doc.cliente_identificacion}</td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">${Number(doc.total).toFixed(2)}</td>
                   <td className="px-4 py-3">
-                    <InvoiceStatusBadge status={doc.status} />
+                    <InvoiceStatusBadge
+                      status={doc.status}
+                      documentType={doc.document_type}
+                      hasAuthorizedCreditNote={doc.document_type === '01' && hasAuthorizedCreditNote(doc.id)}
+                    />
                   </td>
                   <td className="px-4 py-3 text-slate-400 font-mono text-xs">...{doc.clave_acceso.slice(-10)}</td>
                   <td className="px-4 py-3">
@@ -228,6 +243,15 @@ export function FacturasModule() {
                               <Mail className="w-4 h-4" />
                             </span>
                           )}
+                          {doc.document_type === '01' && !hasAuthorizedCreditNote(doc.id) && (
+                            <button
+                              onClick={() => setCreditNoteTarget(doc)}
+                              title="Anular esta factura con una Nota de Crédito"
+                              className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <FileMinus className="w-4 h-4" />
+                            </button>
+                          )}
                         </>
                       ) : (
                         <button
@@ -248,5 +272,17 @@ export function FacturasModule() {
         </div>
       )}
     </div>
+    {creditNoteTarget && currentOrg && (
+      <CreditNoteModal
+        isOpen={Boolean(creditNoteTarget)}
+        onClose={() => setCreditNoteTarget(null)}
+        organizationId={currentOrg.id}
+        sriDocumentId={creditNoteTarget.id}
+        claveAcceso={creditNoteTarget.clave_acceso}
+        total={Number(creditNoteTarget.total)}
+        onIssued={() => { setCreditNoteTarget(null); loadDocuments(); }}
+      />
+    )}
+    </>
   );
 }
