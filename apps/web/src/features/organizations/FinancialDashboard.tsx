@@ -1,12 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useOrg } from './OrgContext';
 import { supabase } from '../../lib/supabase';
+import { formatDate } from '../../lib/formatDate';
 import { Link } from 'react-router';
+import toast from 'react-hot-toast';
+import { Calendar, Search, Loader2, CreditCard, Receipt } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type MonthlyRevenue = { month: string; label: string; amount: number };
-type AttendanceStat = { status: string; count: number; color: string; label: string };
+type RangePreset = 'today' | 'last7' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
+
+type TrendPoint = { key: string; label: string; amount: number };
+type DonutStat = { value: number; color: string; label: string };
 type ServiceRevenue = { name: string; amount: number; count: number };
 type OverdueCharge = {
   id: string;
@@ -27,28 +32,32 @@ type AlertItem = {
 };
 
 type DashboardData = {
-  // Financial KPIs
-  revenueThisMonth: number;
-  revenueLastMonth: number;
-  pendingAmount: number;
-  pendingCount: number;
-  collectionRate: number;
-  overdueAmount: number;
-  overdueCount: number;
+  // Financial KPIs — del rango seleccionado, salvo donde se indica "a hoy"
+  revenueInRange: number;
+  revenuePriorPeriod: number;
+  pendingAmount: number; // a hoy
+  pendingCount: number; // a hoy
+  collectionRate: number; // del rango: ingresos del rango / (ingresos del rango + cargos del rango aún sin pagar)
+  dueInRangeUnpaid: number; // denominador extra de collectionRate — cargos que vencían en el rango y siguen sin pagar
+  overdueAmount: number; // a hoy
+  overdueCount: number; // a hoy
+  avgTicket: number;
   // Operational KPIs
-  activeBeneficiaries: number;
-  activeEnrollments: number;
-  attendanceRateWeek: number;
-  newEnrollmentsMonth: number;
+  activeBeneficiaries: number; // a hoy
+  activeEnrollments: number; // a hoy
+  attendanceRateRange: number;
+  newEnrollmentsInRange: number;
   // Conversion KPIs
-  scheduledAppointments: number;
-  conversionRate: number;
-  pendingDeposits: number;
+  scheduledAppointments: number; // a hoy
+  conversionRate: number; // del rango
+  pendingDeposits: number; // a hoy
   // Charts
-  monthlyRevenue: MonthlyRevenue[];
-  attendanceStats: AttendanceStat[];
+  revenueTrend: TrendPoint[];
+  attendanceStats: DonutStat[];
+  paymentMethodStats: DonutStat[];
+  sriStats: DonutStat[] | null; // null si el centro no tiene facturación electrónica
   topServices: ServiceRevenue[];
-  // Alerts
+  // Alerts (siempre a hoy)
   overdueCharges: OverdueCharge[];
   alerts: AlertItem[];
 };
@@ -60,31 +69,132 @@ const fmt = (n: number) =>
 
 const fmtPct = (n: number) => `${Math.round(n)}%`;
 
+const isoDate = (d: Date) => d.toISOString().split('T')[0];
+
 function getMonthBounds(offset = 0) {
   const d = new Date();
   const first = new Date(d.getFullYear(), d.getMonth() + offset, 1);
   const last = new Date(d.getFullYear(), d.getMonth() + offset + 1, 0);
-  return {
-    start: first.toISOString().split('T')[0],
-    end: last.toISOString().split('T')[0],
-  };
-}
-
-function getWeekBounds() {
-  const d = new Date();
-  const day = d.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const monday = new Date(d);
-  monday.setDate(d.getDate() + mondayOffset);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return {
-    start: monday.toISOString().split('T')[0],
-    end: sunday.toISOString().split('T')[0],
-  };
+  return { start: isoDate(first), end: isoDate(last) };
 }
 
 const MONTH_NAMES_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  transfer: 'Transferencia',
+  card: 'Tarjeta',
+};
+
+const RANGE_PRESETS: { value: RangePreset; label: string }[] = [
+  { value: 'today', label: 'Hoy' },
+  { value: 'last7', label: 'Últimos 7 días' },
+  { value: 'thisMonth', label: 'Este mes' },
+  { value: 'lastMonth', label: 'Mes anterior' },
+  { value: 'thisYear', label: 'Este año' },
+  { value: 'custom', label: 'Personalizado' },
+];
+
+function computePresetRange(preset: RangePreset, customStart?: string, customEnd?: string): { start: string; end: string } {
+  const today = new Date();
+  switch (preset) {
+    case 'today':
+      return { start: isoDate(today), end: isoDate(today) };
+    case 'last7': {
+      const start = new Date(today);
+      start.setDate(today.getDate() - 6);
+      return { start: isoDate(start), end: isoDate(today) };
+    }
+    case 'lastMonth':
+      return getMonthBounds(-1);
+    case 'thisYear':
+      return { start: isoDate(new Date(today.getFullYear(), 0, 1)), end: isoDate(today) };
+    case 'custom':
+      return { start: customStart || isoDate(today), end: customEnd || isoDate(today) };
+    case 'thisMonth':
+    default:
+      return getMonthBounds(0);
+  }
+}
+
+// Ventana inmediatamente anterior, de la misma duración que [start, end] —
+// generaliza "mes anterior" a cualquier rango elegido (mismo criterio que
+// usan la mayoría de dashboards de analítica al comparar períodos).
+function getPriorEquivalentRange(start: string, end: string): { start: string; end: string } {
+  const startDate = new Date(start + 'T00:00:00');
+  const endDate = new Date(end + 'T00:00:00');
+  const spanDays = Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+  const priorEnd = new Date(startDate);
+  priorEnd.setDate(priorEnd.getDate() - 1);
+  const priorStart = new Date(priorEnd);
+  priorStart.setDate(priorStart.getDate() - (spanDays - 1));
+  return { start: isoDate(priorStart), end: isoDate(priorEnd) };
+}
+
+// Granularidad adaptativa: por día si el rango cabe en ≤31 días, por semana
+// si cabe en ≤180, por mes si es más largo — así "Hoy" no intenta mostrar 6
+// meses de barras, y "Este año" no intenta mostrar 365 barras diarias.
+function buildRevenueTrend(rows: { amount: number; payment_date: string }[], start: string, end: string): TrendPoint[] {
+  const startDate = new Date(start + 'T00:00:00');
+  const endDate = new Date(end + 'T00:00:00');
+  const spanDays = Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+
+  const sumByDay: Record<string, number> = {};
+  rows.forEach((r) => {
+    sumByDay[r.payment_date] = (sumByDay[r.payment_date] || 0) + Number(r.amount);
+  });
+
+  if (spanDays <= 31) {
+    const points: TrendPoint[] = [];
+    for (let i = 0; i < spanDays; i++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
+      const key = isoDate(d);
+      points.push({ key, label: String(d.getDate()), amount: sumByDay[key] || 0 });
+    }
+    return points;
+  }
+
+  if (spanDays <= 180) {
+    const points: TrendPoint[] = [];
+    const cursor = new Date(startDate);
+    while (cursor <= endDate) {
+      const weekStart = new Date(cursor);
+      const weekEnd = new Date(cursor);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const clampedEnd = weekEnd > endDate ? endDate : weekEnd;
+      let sum = 0;
+      const d = new Date(weekStart);
+      while (d <= clampedEnd) {
+        sum += sumByDay[isoDate(d)] || 0;
+        d.setDate(d.getDate() + 1);
+      }
+      points.push({
+        key: isoDate(weekStart),
+        label: `${String(weekStart.getDate()).padStart(2, '0')}/${String(weekStart.getMonth() + 1).padStart(2, '0')}`,
+        amount: sum,
+      });
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    return points;
+  }
+
+  const sumByMonth: Record<string, number> = {};
+  rows.forEach((r) => {
+    const d = new Date(r.payment_date);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    sumByMonth[key] = (sumByMonth[key] || 0) + Number(r.amount);
+  });
+  const points: TrendPoint[] = [];
+  const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  const endMonthCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+  while (cursor <= endMonthCursor) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+    points.push({ key, label: MONTH_NAMES_SHORT[cursor.getMonth()], amount: sumByMonth[key] || 0 });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return points;
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -137,7 +247,20 @@ function KpiCard({
   );
 }
 
-function DonutChart({ stats, total }: { stats: AttendanceStat[]; total: number }) {
+// Dona genérica — se reutiliza para asistencia, método de pago y estado de
+// facturación electrónica: cada uno decide qué representa `value` (conteo de
+// sesiones, suma en dólares, conteo de comprobantes) vía `formatValue`.
+function DonutChart({
+  stats,
+  total,
+  centerLabel,
+  formatValue = (v: number) => String(v),
+}: {
+  stats: DonutStat[];
+  total: number;
+  centerLabel: string;
+  formatValue?: (v: number) => string;
+}) {
   const radius = 50;
   const cx = 70;
   const cy = 70;
@@ -147,11 +270,11 @@ function DonutChart({ stats, total }: { stats: AttendanceStat[]; total: number }
 
   return (
     <div className="flex items-center gap-6">
-      <svg width="140" height="140" viewBox="0 0 140 140">
+      <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0">
         <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#f1f5f9" strokeWidth="20" />
         {stats.map((stat, i) => {
-          if (total === 0 || stat.count === 0) return null;
-          const pct = stat.count / total;
+          if (total === 0 || stat.value === 0) return null;
+          const pct = stat.value / total;
           const dash = pct * circumference;
           const gap = circumference - dash;
           const angle = cumulativeAngle;
@@ -167,23 +290,23 @@ function DonutChart({ stats, total }: { stats: AttendanceStat[]; total: number }
               strokeWidth="20"
               strokeDasharray={`${dash} ${gap}`}
               strokeDashoffset={(-circumference * (angle + 90)) / 360}
-              style={{ transform: `rotate(${angle}deg)`, transformOrigin: `${cx}px ${cy}px` }}
+              style={{ transform: `rotate(${angle}deg)`, transformOrigin: `${cx}px ${cy}px`, transition: 'stroke-dasharray 0.6s ease-out' }}
             />
           );
         })}
-        <text x={cx} y={cy - 5} textAnchor="middle" className="text-slate-900" fontSize="18" fontWeight="bold" fill="#0f172a">
-          {total}
+        <text x={cx} y={cy - 5} textAnchor="middle" fontSize="15" fontWeight="bold" fill="#0f172a">
+          {formatValue(total)}
         </text>
-        <text x={cx} y={cy + 12} textAnchor="middle" fontSize="9" fill="#94a3b8">sesiones</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" fontSize="9" fill="#94a3b8">{centerLabel}</text>
       </svg>
-      <div className="space-y-2">
+      <div className="space-y-2 min-w-0">
         {stats.map((stat, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: stat.color }} />
-            <span className="text-xs text-slate-600">{stat.label}</span>
-            <span className="ml-auto text-xs font-bold text-slate-800">{stat.count}</span>
-            <span className="text-[10px] text-slate-400 w-8 text-right">
-              {total > 0 ? `${Math.round((stat.count / total) * 100)}%` : '0%'}
+            <span className="text-xs text-slate-600 truncate">{stat.label}</span>
+            <span className="ml-auto text-xs font-bold text-slate-800 shrink-0">{formatValue(stat.value)}</span>
+            <span className="text-[10px] text-slate-400 w-8 text-right shrink-0">
+              {total > 0 ? `${Math.round((stat.value / total) * 100)}%` : '0%'}
             </span>
           </div>
         ))}
@@ -192,15 +315,19 @@ function DonutChart({ stats, total }: { stats: AttendanceStat[]; total: number }
   );
 }
 
-function BarChart({ data }: { data: MonthlyRevenue[] }) {
+function BarChart({ data }: { data: TrendPoint[] }) {
   const maxVal = Math.max(...data.map((d) => d.amount), 1);
+  // Con muchas barras (ej. 31 días) mostrar una etiqueta por cada una se
+  // amontona — se muestra 1 de cada N, siempre incluyendo la última.
+  const labelEvery = data.length > 15 ? Math.ceil(data.length / 10) : 1;
   return (
-    <div className="flex items-end gap-2 h-32 w-full">
+    <div className="flex items-end gap-1.5 h-32 w-full">
       {data.map((d, i) => {
         const heightPct = (d.amount / maxVal) * 100;
         const isLast = i === data.length - 1;
+        const showLabel = isLast || i % labelEvery === 0;
         return (
-          <div key={d.month} className="flex flex-col items-center gap-1 flex-1 group/bar">
+          <div key={d.key} className="flex flex-col items-center gap-1 flex-1 group/bar min-w-0">
             <div className="relative w-full flex items-end justify-center" style={{ height: '100px' }}>
               {d.amount > 0 && (
                 <div
@@ -215,7 +342,9 @@ function BarChart({ data }: { data: MonthlyRevenue[] }) {
                 style={{ height: `${Math.max(heightPct, d.amount > 0 ? 4 : 0)}%` }}
               />
             </div>
-            <span className={`text-[10px] font-medium ${isLast ? 'text-indigo-600' : 'text-slate-400'}`}>{d.label}</span>
+            <span className={`text-[9px] font-medium truncate ${isLast ? 'text-indigo-600' : 'text-slate-400'}`}>
+              {showLabel ? d.label : ''}
+            </span>
           </div>
         );
       })}
@@ -251,81 +380,208 @@ const severityStyles = {
   low: { border: 'border-l-blue-500', bg: 'bg-blue-50', dot: 'bg-blue-500', badge: 'bg-blue-100 text-blue-700' },
 };
 
+// Selector de rango — presets + rango libre. Los cambios quedan "en
+// borrador" hasta tocar Consultar (no se recarga en cada clic); Limpiar
+// vuelve a "Este mes" y recarga de inmediato.
+function DateRangeControl({
+  draftPreset,
+  setDraftPreset,
+  draftStart,
+  setDraftStart,
+  draftEnd,
+  setDraftEnd,
+  appliedLabel,
+  onApply,
+  onClear,
+  loading,
+}: {
+  draftPreset: RangePreset;
+  setDraftPreset: (p: RangePreset) => void;
+  draftStart: string;
+  setDraftStart: (v: string) => void;
+  draftEnd: string;
+  setDraftEnd: (v: string) => void;
+  appliedLabel: string;
+  onApply: () => void;
+  onClear: () => void;
+  loading: boolean;
+}) {
+  const isCustom = draftPreset === 'custom';
+  const today = isoDate(new Date());
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5">
+      <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+            <Calendar className="w-4.5 h-4.5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Período</p>
+            <p className="text-sm font-bold text-slate-900 truncate">{appliedLabel}</p>
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-wrap items-center gap-2">
+          {RANGE_PRESETS.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => setDraftPreset(p.value)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
+                draftPreset === p.value
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={loading}
+            className="px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            Limpiar
+          </button>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+          >
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            Consultar
+          </button>
+        </div>
+      </div>
+
+      <div className={`grid transition-all duration-300 ease-out ${isCustom ? 'grid-rows-[1fr] opacity-100 mt-4 pt-4 border-t border-slate-100' : 'grid-rows-[0fr] opacity-0'}`}>
+        <div className="overflow-hidden">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Desde</label>
+              <input
+                type="date"
+                value={draftStart}
+                onChange={(e) => setDraftStart(e.target.value)}
+                max={draftEnd || today}
+                className="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Hasta</label>
+              <input
+                type="date"
+                value={draftEnd}
+                onChange={(e) => setDraftEnd(e.target.value)}
+                min={draftStart || undefined}
+                max={today}
+                className="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function FinancialDashboard() {
-  const { currentOrg } = useOrg();
+  const { currentOrg, hasElectronicBilling } = useOrg();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(new Date());
+
+  const defaultRange = computePresetRange('thisMonth');
+  const [draftPreset, setDraftPreset] = useState<RangePreset>('thisMonth');
+  const [draftStart, setDraftStart] = useState('');
+  const [draftEnd, setDraftEnd] = useState('');
+  const [appliedRange, setAppliedRange] = useState(defaultRange);
+  const [appliedLabel, setAppliedLabel] = useState('Este mes');
+
+  const handleApply = () => {
+    if (draftPreset === 'custom') {
+      if (!draftStart || !draftEnd) { toast.error('Selecciona ambas fechas del rango.'); return; }
+      if (draftStart > draftEnd) { toast.error('La fecha "desde" no puede ser posterior a "hasta".'); return; }
+      setAppliedRange({ start: draftStart, end: draftEnd });
+      setAppliedLabel(`${formatDate(draftStart)} – ${formatDate(draftEnd)}`);
+    } else {
+      setAppliedRange(computePresetRange(draftPreset));
+      setAppliedLabel(RANGE_PRESETS.find((p) => p.value === draftPreset)?.label || 'Período');
+    }
+  };
+
+  const handleClear = () => {
+    setDraftPreset('thisMonth');
+    setDraftStart('');
+    setDraftEnd('');
+    setAppliedRange(computePresetRange('thisMonth'));
+    setAppliedLabel('Este mes');
+  };
 
   const loadDashboard = useCallback(async () => {
     if (!currentOrg) return;
     setLoading(true);
 
-    const today = new Date().toISOString().split('T')[0];
-    const thisMo = getMonthBounds(0);
-    const lastMo = getMonthBounds(-1);
-    const week = getWeekBounds();
+    const today = isoDate(new Date());
+    const { start: rangeStart, end: rangeEnd } = appliedRange;
+    const prior = getPriorEquivalentRange(rangeStart, rangeEnd);
     const overdueThreshold = new Date();
     overdueThreshold.setDate(overdueThreshold.getDate() - 30);
-    const overdueDate = overdueThreshold.toISOString().split('T')[0];
+    const overdueDate = isoDate(overdueThreshold);
 
     try {
       const [
-        pmtThisMonthRes,
-        pmtLastMonthRes,
-        pmtSixMonthsRes,
+        rangePmtRes,
+        priorPmtRes,
         chargesPendingRes,
         chargesOverdueRes,
+        chargesDueInRangeRes,
         beneficiariesRes,
         enrollmentsActiveRes,
         enrollmentsNewRes,
-        attendanceWeekRes,
-        attendanceMonthRes,
-        appointmentsRes,
-        serviceRevenueRes,
+        attendanceRangeRes,
+        appointmentsAllRes,
+        appointmentsRangeRes,
         overdueChargesRes,
-        _absenceAlertsRes,
-        nearCompletionRes,
+        sriDocsRes,
       ] = await Promise.all([
-        // 1. Revenue this month
+        // 1. Pagos del rango — alimenta ingresos, tendencia, método de pago,
+        // servicios por ingreso y ticket promedio, todo desde una sola
+        // consulta. Excluye anulados (voided_at) — antes no se excluían en
+        // ningún cálculo de este módulo.
+        supabase
+          .from('internal_payments')
+          .select('amount, payment_date, method, charges(description, beneficiary_id)')
+          .eq('organization_id', currentOrg.id)
+          .is('voided_at', null)
+          .gte('payment_date', rangeStart)
+          .lte('payment_date', rangeEnd),
+
+        // 2. Pagos del período anterior equivalente (para el trend vs.)
         supabase
           .from('internal_payments')
           .select('amount')
           .eq('organization_id', currentOrg.id)
-          .gte('payment_date', thisMo.start)
-          .lte('payment_date', thisMo.end),
+          .is('voided_at', null)
+          .gte('payment_date', prior.start)
+          .lte('payment_date', prior.end),
 
-        // 2. Revenue last month
-        supabase
-          .from('internal_payments')
-          .select('amount')
-          .eq('organization_id', currentOrg.id)
-          .gte('payment_date', lastMo.start)
-          .lte('payment_date', lastMo.end),
-
-        // 3. Revenue last 6 months (for chart)
-        supabase
-          .from('internal_payments')
-          .select('amount, payment_date')
-          .eq('organization_id', currentOrg.id)
-          .gte('payment_date', (() => {
-            const d = new Date();
-            d.setMonth(d.getMonth() - 5);
-            d.setDate(1);
-            return d.toISOString().split('T')[0];
-          })())
-          .lte('payment_date', today),
-
-        // 4. Pending charges
+        // 3. Cartera pendiente — a hoy, sin filtro de fecha
         supabase
           .from('charges')
           .select('amount, status')
           .eq('organization_id', currentOrg.id)
           .in('status', ['pending', 'partial']),
 
-        // 5. Overdue charges summary
+        // 4. Cobros vencidos (resumen) — a hoy
         supabase
           .from('charges')
           .select('amount, status, due_date')
@@ -333,58 +589,63 @@ export function FinancialDashboard() {
           .in('status', ['pending', 'partial'])
           .lt('due_date', today),
 
-        // 6. Active beneficiaries
+        // 5. Cargos que vencieron DENTRO del rango y siguen sin pagarse —
+        // solo para la tasa de cobro del período (denominador correcto: lo
+        // que debía cobrarse en este período, no toda la deuda histórica).
+        supabase
+          .from('charges')
+          .select('amount')
+          .eq('organization_id', currentOrg.id)
+          .in('status', ['pending', 'partial'])
+          .gte('due_date', rangeStart)
+          .lte('due_date', rangeEnd),
+
+        // 6. Beneficiarios activos — a hoy
         supabase
           .from('beneficiaries')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', currentOrg.id)
           .eq('is_active', true),
 
-        // 7. Active enrollments
+        // 7. Inscripciones activas — a hoy
         (supabase as any)
           .from('enrollments')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', currentOrg.id)
           .eq('status', 'active'),
 
-        // 8. New enrollments this month
+        // 8. Nuevas inscripciones del rango
         (supabase as any)
           .from('enrollments')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', currentOrg.id)
-          .gte('created_at', thisMo.start + 'T00:00:00')
-          .lte('created_at', thisMo.end + 'T23:59:59'),
+          .gte('created_at', rangeStart + 'T00:00:00')
+          .lte('created_at', rangeEnd + 'T23:59:59'),
 
-        // 9. Attendance this week
+        // 9. Asistencia del rango (para tasa + donut)
         (supabase as any)
           .from('attendance')
           .select('status')
           .eq('organization_id', currentOrg.id)
-          .gte('session_date', week.start)
-          .lte('session_date', week.end),
+          .gte('session_date', rangeStart)
+          .lte('session_date', rangeEnd),
 
-        // 10. Attendance this month (for donut)
-        (supabase as any)
-          .from('attendance')
-          .select('status')
-          .eq('organization_id', currentOrg.id)
-          .gte('session_date', thisMo.start)
-          .lte('session_date', thisMo.end),
-
-        // 11. Appointments
+        // 10. Todas las citas agendadas (pendientes) — a hoy
         supabase
           .from('appointments')
           .select('status, deposit_amount')
-          .eq('organization_id', currentOrg.id),
-
-        // 12. Service revenue (charges joined with services)
-        supabase
-          .from('charges')
-          .select('amount, description, status')
           .eq('organization_id', currentOrg.id)
-          .in('status', ['paid', 'partial']),
+          .eq('status', 'scheduled'),
 
-        // 13. Overdue charges detail (> 30 days)
+        // 11. Citas del rango (para tasa de conversión del período)
+        supabase
+          .from('appointments')
+          .select('status')
+          .eq('organization_id', currentOrg.id)
+          .gte('appointment_date', rangeStart)
+          .lte('appointment_date', rangeEnd),
+
+        // 12. Cobros vencidos > 30 días (detalle + alertas) — a hoy
         supabase
           .from('charges')
           .select(`id, description, amount, due_date, status, beneficiaries(first_name, last_name)`)
@@ -394,25 +655,21 @@ export function FinancialDashboard() {
           .order('due_date', { ascending: true })
           .limit(8),
 
-        // 14. Beneficiaries with too many absences
-        (supabase as any)
-          .from('commitments')
-          .select('beneficiary_id, max_justified_absences, beneficiaries(first_name, last_name)')
-          .eq('organization_id', currentOrg.id)
-          .limit(20),
-
-        // 15. Enrollments near completion
-        (supabase as any)
-          .from('enrollment_services')
-          .select(`sessions_completed, total_sessions, services(name), enrollments(beneficiaries(first_name, last_name))`)
-          .eq('status', 'active')
-          .not('total_sessions', 'is', null)
-          .limit(20),
+        // 13. Comprobantes electrónicos del rango (solo si aplica al plan)
+        hasElectronicBilling
+          ? (supabase as any)
+              .from('sri_documents')
+              .select('status, document_type')
+              .eq('organization_id', currentOrg.id)
+              .gte('created_at', rangeStart + 'T00:00:00')
+              .lte('created_at', rangeEnd + 'T23:59:59')
+          : Promise.resolve({ data: null }),
       ]);
 
-      // ─── Process Financial KPIs ───────────────────────────────────────────
-      const revenueThisMonth = (pmtThisMonthRes.data || []).reduce((sum: number, p: any) => sum + Number(p.amount), 0);
-      const revenueLastMonth = (pmtLastMonthRes.data || []).reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      // ─── Ingresos del rango + comparación vs. período anterior ───────────
+      const rangePayments = rangePmtRes.data || [];
+      const revenueInRange = rangePayments.reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      const revenuePriorPeriod = (priorPmtRes.data || []).reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
       const pendingAmount = (chargesPendingRes.data || []).reduce((sum: number, c: any) => sum + Number(c.amount), 0);
       const pendingCount = chargesPendingRes.data?.length || 0;
@@ -420,74 +677,89 @@ export function FinancialDashboard() {
       const overdueAmount = (chargesOverdueRes.data || []).reduce((sum: number, c: any) => sum + Number(c.amount), 0);
       const overdueCount = chargesOverdueRes.data?.length || 0;
 
-      const totalBilled = revenueThisMonth + pendingAmount;
-      const collectionRate = totalBilled > 0 ? (revenueThisMonth / totalBilled) * 100 : 0;
+      const dueInRangeUnpaid = (chargesDueInRangeRes.data || []).reduce((sum: number, c: any) => sum + Number(c.amount), 0);
+      const collectionRate = (revenueInRange + dueInRangeUnpaid) > 0
+        ? (revenueInRange / (revenueInRange + dueInRangeUnpaid)) * 100
+        : 100;
 
-      // ─── Monthly Revenue Chart (last 6 months) ───────────────────────────
-      const monthlyRevMap: Record<string, number> = {};
-      (pmtSixMonthsRes.data || []).forEach((p: any) => {
-        const d = new Date(p.payment_date);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        monthlyRevMap[key] = (monthlyRevMap[key] || 0) + Number(p.amount);
-      });
+      // ─── Tendencia de ingresos (granularidad adaptativa) ─────────────────
+      const revenueTrend = buildRevenueTrend(rangePayments, rangeStart, rangeEnd);
 
-      const monthlyRevenue: MonthlyRevenue[] = [];
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date();
-        d.setMonth(d.getMonth() - i);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        monthlyRevenue.push({
-          month: key,
-          label: MONTH_NAMES_SHORT[d.getMonth()],
-          amount: monthlyRevMap[key] || 0,
-        });
-      }
-
-      // ─── Attendance KPIs ─────────────────────────────────────────────────
-      const weekAtt = attendanceWeekRes.data || [];
-      const weekPresent = weekAtt.filter((a: any) => a.status === 'present' || a.status === 'late').length;
-      const weekTotal = weekAtt.filter((a: any) => a.status !== 'scheduled').length;
-      const attendanceRateWeek = weekTotal > 0 ? (weekPresent / weekTotal) * 100 : 0;
-
-      const monthAtt = attendanceMonthRes.data || [];
-      const attCounts: Record<string, number> = {};
-      monthAtt.forEach((a: any) => {
-        if (a.status !== 'scheduled') attCounts[a.status] = (attCounts[a.status] || 0) + 1;
-      });
-      const attendanceStats: AttendanceStat[] = [
-        { status: 'present', count: attCounts['present'] || 0, color: '#10b981', label: 'Presentes' },
-        { status: 'late', count: attCounts['late'] || 0, color: '#f59e0b', label: 'Tardanzas' },
-        { status: 'justified', count: attCounts['justified'] || 0, color: '#6366f1', label: 'Justificadas' },
-        { status: 'absent', count: attCounts['absent'] || 0, color: '#f43f5e', label: 'Ausentes' },
-      ].filter((s) => s.count > 0);
-
-      // ─── Conversion KPIs ─────────────────────────────────────────────────
-      const allAppts = appointmentsRes.data || [];
-      const scheduledAppointments = allAppts.filter((a: any) => a.status === 'scheduled').length;
-      const convertedAppts = allAppts.filter((a: any) => a.status === 'converted').length;
-      const conversionRate = allAppts.length > 0 ? (convertedAppts / allAppts.length) * 100 : 0;
-      const pendingDeposits = allAppts
-        .filter((a: any) => a.status === 'scheduled' && a.deposit_amount > 0)
-        .reduce((sum: number, a: any) => sum + Number(a.deposit_amount), 0);
-
-      // ─── Top Services (by charge description grouping) ───────────────────
+      // ─── Servicios por ingreso — desde los pagos del rango, no desde el
+      // estado actual de los cargos (cargo y pago son cosas distintas). ────
       const svcMap: Record<string, ServiceRevenue> = {};
-      (serviceRevenueRes.data || []).forEach((c: any) => {
-        const key = c.description || 'Otros';
+      rangePayments.forEach((p: any) => {
+        const key = p.charges?.description || 'Otros';
         if (!svcMap[key]) svcMap[key] = { name: key, amount: 0, count: 0 };
-        svcMap[key].amount += Number(c.amount);
+        svcMap[key].amount += Number(p.amount);
         svcMap[key].count += 1;
       });
-      const topServices = Object.values(svcMap)
-        .sort((a, b) => b.amount - a.amount)
-        .slice(0, 5);
+      const topServices = Object.values(svcMap).sort((a, b) => b.amount - a.amount).slice(0, 5);
 
-      // ─── Overdue Charges Detail ───────────────────────────────────────────
+      // ─── Pago por método ──────────────────────────────────────────────────
+      const methodMap: Record<string, number> = {};
+      rangePayments.forEach((p: any) => {
+        methodMap[p.method] = (methodMap[p.method] || 0) + Number(p.amount);
+      });
+      const methodColors: Record<string, string> = { cash: '#10b981', transfer: '#6366f1', card: '#8b5cf6' };
+      const paymentMethodStats: DonutStat[] = Object.entries(methodMap)
+        .map(([method, amount]) => ({
+          value: amount,
+          color: methodColors[method] || '#94a3b8',
+          label: PAYMENT_METHOD_LABELS[method] || 'Otro',
+        }))
+        .sort((a, b) => b.value - a.value);
+
+      // ─── Ticket promedio (ingresos del rango / beneficiarios distintos) ──
+      const distinctBeneficiaries = new Set(
+        rangePayments.map((p: any) => p.charges?.beneficiary_id).filter(Boolean)
+      );
+      const avgTicket = distinctBeneficiaries.size > 0 ? revenueInRange / distinctBeneficiaries.size : 0;
+
+      // ─── Asistencia del rango ─────────────────────────────────────────────
+      const rangeAtt = attendanceRangeRes.data || [];
+      const attPresent = rangeAtt.filter((a: any) => a.status === 'present' || a.status === 'late').length;
+      const attCountable = rangeAtt.filter((a: any) => a.status !== 'scheduled').length;
+      const attendanceRateRange = attCountable > 0 ? (attPresent / attCountable) * 100 : 0;
+
+      const attCounts: Record<string, number> = {};
+      rangeAtt.forEach((a: any) => {
+        if (a.status !== 'scheduled') attCounts[a.status] = (attCounts[a.status] || 0) + 1;
+      });
+      const attendanceStats: DonutStat[] = [
+        { value: attCounts['present'] || 0, color: '#10b981', label: 'Presentes' },
+        { value: attCounts['late'] || 0, color: '#f59e0b', label: 'Tardanzas' },
+        { value: attCounts['justified'] || 0, color: '#6366f1', label: 'Justificadas' },
+        { value: attCounts['absent'] || 0, color: '#f43f5e', label: 'Ausentes' },
+      ].filter((s) => s.value > 0);
+
+      // ─── Conversión (citas del rango) + agendadas/depósitos (a hoy) ──────
+      const rangeAppts = appointmentsRangeRes.data || [];
+      const convertedInRange = rangeAppts.filter((a: any) => a.status === 'converted').length;
+      const conversionRate = rangeAppts.length > 0 ? (convertedInRange / rangeAppts.length) * 100 : 0;
+
+      const scheduledNow = appointmentsAllRes.data || [];
+      const scheduledAppointments = scheduledNow.length;
+      const pendingDeposits = scheduledNow.reduce((sum: number, a: any) => sum + Number(a.deposit_amount || 0), 0);
+
+      // ─── Facturación electrónica del rango (si aplica) ───────────────────
+      let sriStats: DonutStat[] | null = null;
+      if (hasElectronicBilling && sriDocsRes?.data) {
+        const docs = sriDocsRes.data as any[];
+        const facturasOk = docs.filter((d) => d.document_type === '01' && d.status === 'AUTHORIZED').length;
+        const facturasMal = docs.filter((d) => d.document_type === '01' && d.status !== 'AUTHORIZED').length;
+        const notasCredito = docs.filter((d) => d.document_type === '04').length;
+        sriStats = [
+          { value: facturasOk, color: '#10b981', label: 'Facturas autorizadas' },
+          { value: facturasMal, color: '#f43f5e', label: 'Facturas rechazadas' },
+          { value: notasCredito, color: '#6366f1', label: 'Notas de crédito' },
+        ].filter((s) => s.value > 0);
+      }
+
+      // ─── Cobros vencidos (detalle) — a hoy ────────────────────────────────
       const overdueCharges: OverdueCharge[] = (overdueChargesRes.data || []).map((c: any) => {
         const ben = c.beneficiaries;
-        const daysOverdue = Math.floor(
-          (Date.now() - new Date(c.due_date).getTime()) / (1000 * 60 * 60 * 24)
-        );
+        const daysOverdue = Math.floor((Date.now() - new Date(c.due_date).getTime()) / 86400000);
         return {
           id: c.id,
           description: c.description,
@@ -499,10 +771,8 @@ export function FinancialDashboard() {
         };
       });
 
-      // ─── Alerts ───────────────────────────────────────────────────────────
+      // ─── Alertas (a hoy) ───────────────────────────────────────────────────
       const alerts: AlertItem[] = [];
-
-      // Overdue > 60 days
       const criticalOverdue = overdueCharges.filter((c) => c.days_overdue > 60);
       if (criticalOverdue.length > 0) {
         alerts.push({
@@ -513,8 +783,6 @@ export function FinancialDashboard() {
           value: fmt(criticalOverdue.reduce((s, c) => s + c.amount, 0)),
         });
       }
-
-      // Overdue 30–60 days
       const moderateOverdue = overdueCharges.filter((c) => c.days_overdue >= 30 && c.days_overdue <= 60);
       if (moderateOverdue.length > 0) {
         alerts.push({
@@ -526,62 +794,52 @@ export function FinancialDashboard() {
         });
       }
 
-      // Near-completion enrollments
-      const nearCompletion = (nearCompletionRes.data || []).filter((es: any) => {
-        if (!es.total_sessions || es.sessions_completed == null) return false;
-        const pct = es.sessions_completed / es.total_sessions;
-        return pct >= 0.85 && pct < 1;
-      });
-      if (nearCompletion.length > 0) {
-        alerts.push({
-          type: 'sessions',
-          severity: 'low',
-          title: `${nearCompletion.length} inscripción(es) próximas a completarse`,
-          subtitle: 'Considera renovar el plan de sesiones',
-          value: `${nearCompletion.length} paciente(s)`,
-          linkTo: '/app/beneficiarios',
-        });
-      }
-
       setData({
-        revenueThisMonth,
-        revenueLastMonth,
+        revenueInRange,
+        revenuePriorPeriod,
         pendingAmount,
         pendingCount,
         collectionRate,
+        dueInRangeUnpaid,
         overdueAmount,
         overdueCount,
+        avgTicket,
         activeBeneficiaries: beneficiariesRes.count || 0,
         activeEnrollments: (enrollmentsActiveRes as any).count || 0,
-        attendanceRateWeek,
-        newEnrollmentsMonth: (enrollmentsNewRes as any).count || 0,
+        attendanceRateRange,
+        newEnrollmentsInRange: (enrollmentsNewRes as any).count || 0,
         scheduledAppointments,
         conversionRate,
         pendingDeposits,
-        monthlyRevenue,
+        revenueTrend,
         attendanceStats,
+        paymentMethodStats,
+        sriStats,
         topServices,
         overdueCharges,
         alerts,
       });
     } catch (err: any) {
       console.error('Error loading financial dashboard:', err);
+      toast.error('No se pudo cargar el reporte: ' + (err?.message || 'error desconocido'));
     } finally {
       setLoading(false);
       setLastRefresh(new Date());
     }
-  }, [currentOrg]);
+  }, [currentOrg, appliedRange, hasElectronicBilling]);
 
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
 
   const revTrend =
-    data && data.revenueLastMonth > 0
-      ? Math.abs(((data.revenueThisMonth - data.revenueLastMonth) / data.revenueLastMonth) * 100).toFixed(1) + '%'
+    data && data.revenuePriorPeriod > 0
+      ? Math.abs(((data.revenueInRange - data.revenuePriorPeriod) / data.revenuePriorPeriod) * 100).toFixed(1) + '%'
       : undefined;
-  const revTrendUp = data ? data.revenueThisMonth >= data.revenueLastMonth : true;
-  const attTotal = data?.attendanceStats.reduce((s, a) => s + a.count, 0) ?? 0;
+  const revTrendUp = data ? data.revenueInRange >= data.revenuePriorPeriod : true;
+  const attTotal = data?.attendanceStats.reduce((s, a) => s + a.value, 0) ?? 0;
+  const methodTotal = data?.paymentMethodStats.reduce((s, a) => s + a.value, 0) ?? 0;
+  const sriTotal = data?.sriStats?.reduce((s, a) => s + a.value, 0) ?? 0;
   const maxSvcAmount = data?.topServices[0]?.amount || 1;
 
   return (
@@ -613,7 +871,21 @@ export function FinancialDashboard() {
           </div>
         </div>
 
-        {/* ── Alerts Banner ───────────────────────────────────────────── */}
+        {/* ── Selector de rango ───────────────────────────────────────── */}
+        <DateRangeControl
+          draftPreset={draftPreset}
+          setDraftPreset={setDraftPreset}
+          draftStart={draftStart}
+          setDraftStart={setDraftStart}
+          draftEnd={draftEnd}
+          setDraftEnd={setDraftEnd}
+          appliedLabel={appliedLabel}
+          onApply={handleApply}
+          onClear={handleClear}
+          loading={loading}
+        />
+
+        {/* ── Alerts Banner (a hoy) ───────────────────────────────────── */}
         {(data?.alerts.length ?? 0) > 0 && (
           <div className="space-y-2">
             {data!.alerts.map((alert, i) => {
@@ -637,14 +909,14 @@ export function FinancialDashboard() {
 
         {/* ── Financial KPIs ──────────────────────────────────────────── */}
         <div>
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Resumen Financiero — Este Mes</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Resumen Financiero — {appliedLabel}</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <KpiCard
               loading={loading}
               color="bg-emerald-50 text-emerald-600"
-              label="Ingresos del Mes"
-              value={fmt(data?.revenueThisMonth || 0)}
-              sub={`vs ${fmt(data?.revenueLastMonth || 0)} mes anterior`}
+              label="Ingresos del Período"
+              value={fmt(data?.revenueInRange || 0)}
+              sub={`vs ${fmt(data?.revenuePriorPeriod || 0)} período anterior`}
               trend={revTrend}
               trendUp={revTrendUp}
               icon={
@@ -658,7 +930,7 @@ export function FinancialDashboard() {
               color="bg-blue-50 text-blue-600"
               label="Cartera Pendiente"
               value={fmt(data?.pendingAmount || 0)}
-              sub={`${data?.pendingCount || 0} cargo(s) sin liquidar`}
+              sub={`${data?.pendingCount || 0} cargo(s) sin liquidar — a hoy`}
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -689,10 +961,22 @@ export function FinancialDashboard() {
               color="bg-red-50 text-red-600"
               label="Cobros Vencidos"
               value={fmt(data?.overdueAmount || 0)}
-              sub={`${data?.overdueCount || 0} cargo(s) sin pago`}
+              sub={`${data?.overdueCount || 0} cargo(s) sin pago — a hoy`}
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              }
+            />
+            <KpiCard
+              loading={loading}
+              color="bg-violet-50 text-violet-600"
+              label="Ticket Promedio"
+              value={fmt(data?.avgTicket || 0)}
+              sub="ingreso del período / beneficiarios"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
               }
             />
@@ -703,7 +987,7 @@ export function FinancialDashboard() {
         {!loading && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-slate-600">Progreso de cobro del mes</span>
+              <span className="text-xs font-semibold text-slate-600">Progreso de cobro del período</span>
               <span className="text-xs font-bold text-indigo-600">{fmtPct(data?.collectionRate || 0)} cobrado</span>
             </div>
             <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
@@ -716,8 +1000,8 @@ export function FinancialDashboard() {
               />
             </div>
             <div className="flex justify-between mt-1">
-              <span className="text-[10px] text-slate-400">Cobrado: {fmt(data?.revenueThisMonth || 0)}</span>
-              <span className="text-[10px] text-slate-400">Pendiente: {fmt(data?.pendingAmount || 0)}</span>
+              <span className="text-[10px] text-slate-400">Cobrado: {fmt(data?.revenueInRange || 0)}</span>
+              <span className="text-[10px] text-slate-400">Vencía en el período y sigue sin pagar: {fmt(data?.dueInRangeUnpaid || 0)}</span>
             </div>
           </div>
         )}
@@ -731,7 +1015,7 @@ export function FinancialDashboard() {
               color="bg-violet-50 text-violet-600"
               label="Beneficiarios Activos"
               value={String(data?.activeBeneficiaries || 0)}
-              sub="niños/pacientes en el centro"
+              sub="niños/pacientes en el centro — a hoy"
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -743,7 +1027,7 @@ export function FinancialDashboard() {
               color="bg-cyan-50 text-cyan-600"
               label="Inscripciones Activas"
               value={String(data?.activeEnrollments || 0)}
-              sub={`${data?.newEnrollmentsMonth || 0} nueva(s) este mes`}
+              sub={`${data?.newEnrollmentsInRange || 0} nueva(s) en el período`}
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -753,9 +1037,9 @@ export function FinancialDashboard() {
             <KpiCard
               loading={loading}
               color="bg-emerald-50 text-emerald-600"
-              label="Asistencia Esta Semana"
-              value={fmtPct(data?.attendanceRateWeek || 0)}
-              sub="presente o tardanza / sesiones"
+              label="Tasa de Asistencia"
+              value={fmtPct(data?.attendanceRateRange || 0)}
+              sub="presente o tardanza / sesiones del período"
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
@@ -766,8 +1050,8 @@ export function FinancialDashboard() {
               loading={loading}
               color="bg-amber-50 text-amber-600"
               label="Nuevas Matrículas"
-              value={String(data?.newEnrollmentsMonth || 0)}
-              sub="inscripciones del mes actual"
+              value={String(data?.newEnrollmentsInRange || 0)}
+              sub="inscripciones creadas en el período"
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
@@ -786,7 +1070,7 @@ export function FinancialDashboard() {
               color="bg-indigo-50 text-indigo-600"
               label="Citas Agendadas"
               value={String(data?.scheduledAppointments || 0)}
-              sub="pendientes de atender"
+              sub="pendientes de atender — a hoy"
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -798,7 +1082,7 @@ export function FinancialDashboard() {
               color="bg-emerald-50 text-emerald-600"
               label="Tasa de Conversión"
               value={fmtPct(data?.conversionRate || 0)}
-              sub="citas que se convirtieron en matrículas"
+              sub="citas del período que se matricularon"
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
@@ -810,7 +1094,7 @@ export function FinancialDashboard() {
               color="bg-amber-50 text-amber-600"
               label="Depósitos por Cobrar"
               value={fmt(data?.pendingDeposits || 0)}
-              sub="de citas programadas con depósito"
+              sub="de citas programadas con depósito — a hoy"
               icon={
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -820,54 +1104,88 @@ export function FinancialDashboard() {
           </div>
         </div>
 
-        {/* ── Charts Row ───────────────────────────────────────────────── */}
+        {/* ── Charts Row 1: Tendencia + Asistencia ───────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Revenue Bar Chart */}
           <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Ingresos Mensuales</h3>
-                <p className="text-xs text-slate-400">Últimos 6 meses</p>
+                <h3 className="text-sm font-bold text-slate-900">Ingresos</h3>
+                <p className="text-xs text-slate-400">{appliedLabel}</p>
               </div>
               <div className="w-3 h-3 rounded-full bg-indigo-500" />
             </div>
             {loading ? (
               <div className="h-32 animate-pulse bg-slate-100 rounded-xl" />
             ) : (
-              <BarChart data={data?.monthlyRevenue || []} />
+              <BarChart data={data?.revenueTrend || []} />
             )}
           </div>
 
-          {/* Attendance Donut */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="mb-4">
-              <h3 className="text-sm font-bold text-slate-900">Asistencia del Mes</h3>
-              <p className="text-xs text-slate-400">Distribución de sesiones</p>
+              <h3 className="text-sm font-bold text-slate-900">Asistencia</h3>
+              <p className="text-xs text-slate-400">Distribución de sesiones — {appliedLabel}</p>
             </div>
             {loading ? (
               <div className="h-32 animate-pulse bg-slate-100 rounded-xl" />
             ) : attTotal === 0 ? (
               <div className="h-32 flex items-center justify-center text-slate-400 text-sm">Sin datos de asistencia</div>
             ) : (
-              <DonutChart stats={data!.attendanceStats} total={attTotal} />
+              <DonutChart stats={data!.attendanceStats} total={attTotal} centerLabel="sesiones" />
             )}
           </div>
         </div>
 
+        {/* ── Charts Row 2: Método de pago + Facturación electrónica ─────── */}
+        <div className={`grid grid-cols-1 ${data?.sriStats ? 'lg:grid-cols-2' : ''} gap-6`}>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <CreditCard className="w-4 h-4 text-slate-400" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Ingresos por Método de Pago</h3>
+                <p className="text-xs text-slate-400">{appliedLabel}</p>
+              </div>
+            </div>
+            {loading ? (
+              <div className="h-32 animate-pulse bg-slate-100 rounded-xl" />
+            ) : methodTotal === 0 ? (
+              <div className="h-32 flex items-center justify-center text-slate-400 text-sm">Sin pagos en el período</div>
+            ) : (
+              <DonutChart stats={data!.paymentMethodStats} total={methodTotal} centerLabel="cobrado" formatValue={fmt} />
+            )}
+          </div>
+
+          {data?.sriStats && (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Receipt className="w-4 h-4 text-slate-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Facturación Electrónica</h3>
+                  <p className="text-xs text-slate-400">{appliedLabel}</p>
+                </div>
+              </div>
+              {sriTotal === 0 ? (
+                <div className="h-32 flex items-center justify-center text-slate-400 text-sm">Sin comprobantes en el período</div>
+              ) : (
+                <DonutChart stats={data.sriStats} total={sriTotal} centerLabel="comprobantes" />
+              )}
+            </div>
+          )}
+        </div>
+
         {/* ── Bottom Row: Top Services + Overdue Table ──────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Top Services */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="mb-4">
               <h3 className="text-sm font-bold text-slate-900">Servicios por Ingreso</h3>
-              <p className="text-xs text-slate-400">Basado en cobros pagados / parciales</p>
+              <p className="text-xs text-slate-400">Basado en pagos recibidos — {appliedLabel}</p>
             </div>
             {loading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => <div key={i} className="h-8 animate-pulse bg-slate-100 rounded-lg" />)}
               </div>
             ) : (data?.topServices.length || 0) === 0 ? (
-              <div className="h-24 flex items-center justify-center text-slate-400 text-sm">Sin datos de servicios</div>
+              <div className="h-24 flex items-center justify-center text-slate-400 text-sm">Sin pagos en el período</div>
             ) : (
               <div className="space-y-4">
                 {data!.topServices.map((svc, i) => (
@@ -877,17 +1195,13 @@ export function FinancialDashboard() {
             )}
           </div>
 
-          {/* Overdue Charges Table */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Cobros Vencidos</h3>
-                <p className="text-xs text-slate-400">Pendientes sin pago a la fecha</p>
+                <p className="text-xs text-slate-400">Pendientes sin pago — a hoy</p>
               </div>
-              <Link
-                to="/app/cobros"
-                className="text-xs font-semibold text-indigo-600 hover:underline"
-              >
+              <Link to="/app/cobros" className="text-xs font-semibold text-indigo-600 hover:underline">
                 Ver todos →
               </Link>
             </div>
@@ -926,7 +1240,7 @@ export function FinancialDashboard() {
 
         {/* Footer */}
         <p className="text-center text-xs text-slate-400 pb-4">
-          Los datos se calculan en tiempo real desde tu base de datos. Recarga para ver la información más reciente.
+          Los datos financieros y operativos siguen el período elegido arriba; cartera vencida y beneficiarios/inscripciones activas se muestran siempre a la fecha de hoy.
         </p>
       </div>
     </div>
