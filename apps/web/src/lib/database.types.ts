@@ -848,6 +848,7 @@ export type Database = {
         Row: {
           amount: number
           billing_cycle: string | null
+          charge_id: string | null
           created_at: string
           id: string
           notes: string | null
@@ -859,6 +860,7 @@ export type Database = {
         Insert: {
           amount: number
           billing_cycle?: string | null
+          charge_id?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -870,6 +872,7 @@ export type Database = {
         Update: {
           amount?: number
           billing_cycle?: string | null
+          charge_id?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -879,6 +882,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "payments_charge_id_fkey"
+            columns: ["charge_id"]
+            isOneToOne: false
+            referencedRelation: "platform_charges"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "payments_organization_id_fkey"
             columns: ["organization_id"]
@@ -902,6 +912,63 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      platform_charges: {
+        Row: {
+          amount: number
+          billing_cycle: string
+          created_at: string
+          due_date: string
+          id: string
+          notes: string | null
+          organization_id: string
+          period_label: string | null
+          plan_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          billing_cycle: string
+          created_at?: string
+          due_date: string
+          id?: string
+          notes?: string | null
+          organization_id: string
+          period_label?: string | null
+          plan_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          billing_cycle?: string
+          created_at?: string
+          due_date?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          period_label?: string | null
+          plan_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_charges_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "platform_charges_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "subscription_plans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       platform_settings: {
         Row: {
@@ -1344,6 +1411,7 @@ export type Database = {
       }
       subscriptions: {
         Row: {
+          billing_cycle: string
           created_at: string
           current_period_end: string | null
           id: string
@@ -1355,6 +1423,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          billing_cycle?: string
           created_at?: string
           current_period_end?: string | null
           id?: string
@@ -1366,6 +1435,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          billing_cycle?: string
           created_at?: string
           current_period_end?: string | null
           id?: string
@@ -1445,33 +1515,22 @@ export type Database = {
       is_organization_active: { Args: { p_org_id: string }; Returns: boolean }
       is_platform_admin: { Args: { p_user_id?: string }; Returns: boolean }
       superadmin_assign_plan: {
-        Args: { p_org_id: string; p_plan_id: string }
+        Args: { p_billing_cycle: string; p_org_id: string; p_plan_id: string }
         Returns: undefined
       }
       superadmin_create_organization: {
         Args: { p_org_name: string; p_plan_id?: string }
         Returns: string
       }
-      superadmin_register_payment:
-        | {
-            Args: {
-              p_amount: number
-              p_billing_cycle: string
-              p_notes: string
-              p_org_id: string
-              p_reference: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
-              p_amount: number
-              p_notes: string
-              p_org_id: string
-              p_reference: string
-            }
-            Returns: string
-          }
+      superadmin_register_payment: {
+        Args: {
+          p_charge_id: string
+          p_notes: string
+          p_org_id: string
+          p_reference: string
+        }
+        Returns: string
+      }
       superadmin_set_subscription_status: {
         Args: { p_org_id: string; p_status: string }
         Returns: undefined

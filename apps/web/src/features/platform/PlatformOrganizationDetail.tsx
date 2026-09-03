@@ -14,15 +14,26 @@ type SriConfig = {
   cert_uploaded_at: string | null;
 };
 
+type PendingCharge = {
+  id: string;
+  amount: number;
+  billing_cycle: 'monthly' | 'annual';
+  due_date: string;
+  period_label: string | null;
+};
+
 type Organization = {
   id: string;
   name: string;
   created_at: string;
   subscription_status?: string;
+  billing_cycle?: 'monthly' | 'annual';
+  current_period_end?: string | null;
   plan_id?: string;
   plan_name?: string;
   plan_price?: number;
   plan_price_annual?: number;
+  pending_charge?: PendingCharge | null;
 };
 
 type SubscriptionPlan = {
@@ -76,13 +87,13 @@ export function PlatformOrganizationDetail() {
   // Pagos
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState<number | ''>('');
-  const [paymentCycle, setPaymentCycle] = useState<'monthly' | 'annual'>('monthly');
 
   // Planes
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [selectedBillingCycle, setSelectedBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [isAssigningPlan, setIsAssigningPlan] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
   const fetchDetails = useCallback(async () => {
     if (!orgId) throw new Error('Falta el id de la organización.');
@@ -101,6 +112,8 @@ export function PlatformOrganizationDetail() {
       .select(`
         status,
         plan_id,
+        billing_cycle,
+        current_period_end,
         subscription_plans (
           id,
           name,
@@ -111,14 +124,26 @@ export function PlatformOrganizationDetail() {
       .eq('organization_id', orgId)
       .single();
 
+    // 2b. Cargo pendiente actual (a lo sumo uno — lo garantiza el índice
+    // único parcial idx_platform_charges_one_pending_per_org).
+    const { data: chargeData } = await supabase
+      .from('platform_charges')
+      .select('id, amount, billing_cycle, due_date, period_label')
+      .eq('organization_id', orgId)
+      .eq('status', 'pending')
+      .maybeSingle();
+
     const planData = subData?.subscription_plans as any;
     const org: Organization = {
       ...orgData,
       subscription_status: subData?.status,
+      billing_cycle: (subData?.billing_cycle as 'monthly' | 'annual') || 'monthly',
+      current_period_end: subData?.current_period_end,
       plan_id: subData?.plan_id,
       plan_name: planData?.name,
       plan_price: planData?.price_monthly,
       plan_price_annual: planData?.price_annual,
+      pending_charge: (chargeData as PendingCharge) || null,
     };
 
     // 3. Obtener planes disponibles
@@ -184,6 +209,10 @@ export function PlatformOrganizationDetail() {
   }, [orgDetailData?.organization.plan_id]);
 
   useLayoutEffect(() => {
+    setSelectedBillingCycle(orgDetailData?.organization.billing_cycle || 'monthly');
+  }, [orgDetailData?.organization.billing_cycle]);
+
+  useLayoutEffect(() => {
     const env = orgDetailData?.sriConfig?.environment;
     if (env) setSriEnvironment(env);
   }, [orgDetailData?.sriConfig?.environment]);
@@ -195,14 +224,33 @@ export function PlatformOrganizationDetail() {
       const { error } = await supabase.rpc('superadmin_assign_plan', {
         p_org_id: orgId,
         p_plan_id: selectedPlanId,
+        p_billing_cycle: selectedBillingCycle,
       });
       if (error) throw error;
-      toast.success('Plan actualizado correctamente.');
+      toast.success('Plan actualizado — se generó el cargo pendiente correspondiente.');
       await invalidateOrgDetail();
     } catch (err: any) {
       toast.error('Error al asignar plan: ' + err.message);
     } finally {
       setIsAssigningPlan(false);
+    }
+  };
+
+  const handleSetStatus = async (status: string) => {
+    if (!orgId) return;
+    setIsUpdatingStatus(true);
+    try {
+      const { error } = await supabase.rpc('superadmin_set_subscription_status', {
+        p_org_id: orgId,
+        p_status: status,
+      });
+      if (error) throw error;
+      toast.success('Estado actualizado.');
+      await invalidateOrgDetail();
+    } catch (err: any) {
+      toast.error('Error actualizando estado: ' + err.message);
+    } finally {
+      setIsUpdatingStatus(false);
     }
   };
 
@@ -267,21 +315,19 @@ export function PlatformOrganizationDetail() {
     }
   };
 
-  const handleRegisterPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!orgId || !paymentAmount) return;
-    
+  const handleRegisterPayment = async () => {
+    if (!orgId || !organization?.pending_charge) return;
+
     setIsSubmittingPayment(true);
     try {
       const { error } = await supabase.rpc('superadmin_register_payment', {
         p_org_id: orgId,
-        p_amount: Number(paymentAmount),
-        p_billing_cycle: paymentCycle,
+        p_charge_id: organization.pending_charge.id,
         p_reference: 'Pago manual desde panel superadmin',
         p_notes: '',
       });
       if (error) throw error;
-      toast.success('Pago registrado exitosamente.');
+      toast.success('Pago registrado — se generó el siguiente cargo pendiente.');
       setIsPaymentOpen(false);
       invalidateOrgDetail();
     } catch (err: any) {
@@ -514,10 +560,17 @@ export function PlatformOrganizationDetail() {
           <div className="space-y-6">
             {/* Plan actual */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-              <h3 className="font-semibold text-slate-800 text-lg mb-5 flex items-center gap-2">
-                <PackageCheck className="w-5 h-5 text-indigo-500" />
-                Plan Actual
-              </h3>
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="font-semibold text-slate-800 text-lg flex items-center gap-2">
+                  <PackageCheck className="w-5 h-5 text-indigo-500" />
+                  Plan Actual
+                </h3>
+                {organization.plan_id && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    Ciclo actual: {organization.billing_cycle === 'annual' ? 'Anual' : 'Mensual'}
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div className="border border-slate-200 rounded-xl p-4 bg-slate-50">
                   <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Plan</p>
@@ -535,7 +588,7 @@ export function PlatformOrganizationDetail() {
 
               {/* Cambiar plan */}
               <div className="border-t border-slate-100 pt-5">
-                <p className="text-sm font-semibold text-slate-700 mb-3">Cambiar Plan</p>
+                <p className="text-sm font-semibold text-slate-700 mb-3">Cambiar Plan / Ciclo</p>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <select
                     value={selectedPlanId}
@@ -549,21 +602,35 @@ export function PlatformOrganizationDetail() {
                       </option>
                     ))}
                   </select>
+                  <select
+                    value={selectedBillingCycle}
+                    onChange={(e) => setSelectedBillingCycle(e.target.value as 'monthly' | 'annual')}
+                    className="bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-auto"
+                  >
+                    <option value="monthly">Mensual</option>
+                    <option value="annual">Anual</option>
+                  </select>
                   <button
                     onClick={handleAssignPlan}
-                    disabled={isAssigningPlan || selectedPlanId === organization.plan_id}
+                    disabled={isAssigningPlan || (selectedPlanId === organization.plan_id && selectedBillingCycle === organization.billing_cycle)}
                     className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap w-full sm:w-auto"
                   >
                     {isAssigningPlan ? 'Aplicando...' : 'Aplicar Plan'}
                   </button>
                 </div>
-                {selectedPlanId !== organization.plan_id && selectedPlanId && (
-                  <p className="mt-2 text-xs text-amber-600 font-medium">⚠ El cambio de plan no genera cobro automático. El monto del próximo pago debe corresponder al precio del nuevo plan.</p>
-                )}
+                {(selectedPlanId !== organization.plan_id || selectedBillingCycle !== organization.billing_cycle) && selectedPlanId && (() => {
+                  const plan = availablePlans.find(p => p.id === selectedPlanId);
+                  const amount = plan ? (selectedBillingCycle === 'annual' ? plan.price_annual : plan.price_monthly) : 0;
+                  return (
+                    <p className="mt-2 text-xs text-amber-600 font-medium">
+                      ⚠ Al aplicar, se generará un cargo pendiente de ${amount} USD ({selectedBillingCycle === 'annual' ? 'anual' : 'mensual'}) y se anulará cualquier cargo pendiente anterior.
+                    </p>
+                  );
+                })()}
               </div>
             </div>
 
-            {/* Estado y registro de pago */}
+            {/* Estado y cargo pendiente */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
               <h3 className="font-semibold text-slate-800 text-lg mb-5 flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-indigo-500" />
@@ -572,7 +639,7 @@ export function PlatformOrganizationDetail() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="border border-slate-200 rounded-xl p-5 bg-slate-50">
                   <p className="text-sm text-slate-500 font-medium mb-1">Estado de Suscripción</p>
-                  <p className={`text-xl font-bold ${
+                  <p className={`text-xl font-bold mb-3 ${
                     organization.subscription_status === 'active' ? 'text-emerald-600' :
                     organization.subscription_status === 'trialing' ? 'text-indigo-600' :
                     organization.subscription_status === 'past_due' ? 'text-amber-600' :
@@ -587,19 +654,43 @@ export function PlatformOrganizationDetail() {
                      organization.subscription_status === 'canceled' ? '✕ Cancelado' :
                      'Sin suscripción'}
                   </p>
+                  {organization.subscription_status && (
+                    <select
+                      value={organization.subscription_status}
+                      onChange={(e) => handleSetStatus(e.target.value)}
+                      disabled={isUpdatingStatus}
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                    >
+                      <option value="trialing">En Prueba (Trialing)</option>
+                      <option value="active">Activo (Active)</option>
+                      <option value="past_due">Pago Pendiente (Past Due)</option>
+                      <option value="suspended">Suspendido (Suspended)</option>
+                      <option value="canceled">Cancelado (Canceled)</option>
+                    </select>
+                  )}
                 </div>
-                <div className="border border-slate-200 rounded-xl p-5 bg-slate-50 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-500 font-medium mb-1">Precio del Plan Actual</p>
-                    <p className="text-xl font-bold text-slate-900">${organization.plan_price ?? 0} USD / mes</p>
-                  </div>
-                  <button
-                    onClick={() => setIsPaymentOpen(true)}
-                    disabled={organization.subscription_status === 'canceled'}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-40"
-                  >
-                    Registrar Pago
-                  </button>
+                <div className="border border-slate-200 rounded-xl p-5 bg-slate-50 flex items-center justify-between gap-3">
+                  {organization.pending_charge ? (
+                    <>
+                      <div className="min-w-0">
+                        <p className="text-sm text-slate-500 font-medium mb-1">Cargo Pendiente</p>
+                        <p className="text-xl font-bold text-slate-900">${Number(organization.pending_charge.amount).toFixed(2)} USD</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Vence {formatDate(organization.pending_charge.due_date)} · {organization.pending_charge.billing_cycle === 'annual' ? 'Anual' : 'Mensual'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setIsPaymentOpen(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors whitespace-nowrap"
+                      >
+                        Confirmar Pago
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">
+                      No hay ningún cargo pendiente registrado{organization.plan_id ? ' — vuelve a aplicar el plan para generarlo.' : '.'}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -727,62 +818,6 @@ export function PlatformOrganizationDetail() {
         </div>
       )}
 
-      {/* MODAL: Registrar Pago */}
-      {isPaymentOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 w-full max-w-md">
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Registrar Pago</h3>
-            <p className="text-sm text-slate-500 mb-6">
-              El pago debe ser por el monto exacto del ciclo seleccionado.
-            </p>
-
-            <form onSubmit={handleRegisterPayment} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Ciclo a pagar</label>
-                <select
-                  value={paymentCycle}
-                  onChange={(e) => setPaymentCycle(e.target.value as 'monthly' | 'annual')}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="monthly">Mensual</option>
-                  <option value="annual">Anual</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Monto (USD)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(Number(e.target.value))}
-                  placeholder="Ej: 30.00"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  required
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsPaymentOpen(false)}
-                  className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingPayment}
-                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
-                >
-                  {isSubmittingPayment && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {isSubmittingPayment ? 'Registrando...' : 'Confirmar Pago'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* DIALOGOS DE CONFIRMACIÓN */}
       <ConfirmDialog
         isOpen={confirmCancelInv.isOpen}
@@ -792,6 +827,20 @@ export function PlatformOrganizationDetail() {
         cancelText="Volver"
         onConfirm={handleCancelInvitation}
         onCancel={() => setConfirmCancelInv({ isOpen: false, id: null })}
+      />
+
+      <ConfirmDialog
+        isOpen={isPaymentOpen && Boolean(organization.pending_charge)}
+        title="Confirmar Pago Recibido"
+        message={
+          organization.pending_charge
+            ? `¿Confirmas que se recibió el pago de $${Number(organization.pending_charge.amount).toFixed(2)} USD (${organization.pending_charge.billing_cycle === 'annual' ? 'ciclo anual' : 'ciclo mensual'})? Esto marcará el cargo como pagado, avanzará la fecha de vencimiento de la suscripción, y generará automáticamente el siguiente cargo pendiente.`
+            : ''
+        }
+        confirmText={isSubmittingPayment ? 'Registrando...' : 'Sí, Confirmar Pago'}
+        cancelText="Cancelar"
+        onConfirm={handleRegisterPayment}
+        onCancel={() => setIsPaymentOpen(false)}
       />
     </div>
   );

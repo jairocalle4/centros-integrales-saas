@@ -16,6 +16,7 @@ type Organization = {
   trial_end?: string | null;
   current_period_end?: string | null;
   plan_id?: string;
+  billing_cycle?: string;
 };
 
 
@@ -189,7 +190,7 @@ export function PlatformDashboard() {
       pmtsRes
     ] = await Promise.all([
       supabase.from('organizations').select('*').order('created_at', { ascending: false }),
-      supabase.from('subscriptions').select('organization_id, status, trial_start, trial_end, current_period_end, plan_id'),
+      supabase.from('subscriptions').select('organization_id, status, trial_start, trial_end, current_period_end, plan_id, billing_cycle'),
       supabase.from('subscription_plans').select('*').order('created_at', { ascending: true }),
       supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100),
       (supabase as any).from('invitations').select('*, organizations(name)').order('created_at', { ascending: false }),
@@ -207,7 +208,8 @@ export function PlatformDashboard() {
         trial_start: sub?.trial_start,
         trial_end: sub?.trial_end,
         current_period_end: sub?.current_period_end,
-        plan_id: sub?.plan_id
+        plan_id: sub?.plan_id,
+        billing_cycle: sub?.billing_cycle
       };
     });
 
@@ -447,12 +449,14 @@ export function PlatformDashboard() {
   const fmt = (n: number) =>
     new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
 
+  // Un centro en ciclo anual aporta price_annual/12 al MRR, no
+  // price_monthly — antes se asumía mensual para todos, sin importar el
+  // ciclo real (billing_cycle) de la suscripción.
   const mrr = organizations.reduce((sum, org) => {
-    if (org.status === 'active' && org.plan_id) {
-      const plan = plans.find((p) => p.id === org.plan_id);
-      return sum + (plan?.price_monthly || 0);
-    }
-    return sum;
+    if (org.status !== 'active' || !org.plan_id) return sum;
+    const plan = plans.find((p) => p.id === org.plan_id);
+    if (!plan) return sum;
+    return sum + (org.billing_cycle === 'annual' ? (plan.price_annual || 0) / 12 : (plan.price_monthly || 0));
   }, 0);
 
   const arr = mrr * 12;
