@@ -1082,14 +1082,21 @@ async function handleRetry(
 
   const { data: doc, error: docError } = await supabaseClient
     .from('sri_documents')
-    .select('id, clave_acceso, status, total, cliente_identificacion, cliente_razon_social, cliente_email, regimen_fiscal_aplicado, environment_aplicado, email_sent_at, document_type, documento_modificado_id, motivo')
+    .select('id, clave_acceso, status, total, cliente_identificacion, cliente_razon_social, cliente_email, regimen_fiscal_aplicado, environment_aplicado, email_sent_at, document_type, documento_modificado_id, motivo, pdf_url')
     .eq('id', sri_document_id)
     .eq('organization_id', organization_id)
     .maybeSingle();
   if (docError) throw docError;
   if (!doc) throw new Error('Comprobante no encontrado en este centro.');
-  if (doc.status !== 'REJECTED' && doc.status !== 'ERROR') {
-    throw new Error(`Solo se pueden reintentar comprobantes rechazados o con error (estado actual: ${doc.status}).`);
+  // Un comprobante ya AUTHORIZED puede reintentarse, pero solo para
+  // generar el RIDE que le falta (ver más abajo) — nunca para
+  // resubmitirlo al SRI, que ya lo autorizó.
+  const isRideOnlyRetry = doc.status === 'AUTHORIZED';
+  if (isRideOnlyRetry && doc.pdf_url) {
+    throw new Error('Este comprobante ya tiene su RIDE generado — no hace falta reintentar.');
+  }
+  if (doc.status !== 'REJECTED' && doc.status !== 'ERROR' && !isRideOnlyRetry) {
+    throw new Error(`Solo se pueden reintentar comprobantes rechazados, con error, o autorizados sin RIDE (estado actual: ${doc.status}).`);
   }
 
   // Si es una nota de crédito, el RIDE regenerado más abajo necesita el
@@ -1112,34 +1119,45 @@ async function handleRetry(
     }
   }
 
-  // Igual que en la emisión: nunca se reintenta a ciegas ante una
-  // excepción de red en una llamada que muta estado fiscal real.
-  const { ok, data: retryResult } = await sriApiFetch(`/sri/comprobantes/${doc.clave_acceso}/reintentar`, {
-    method: 'POST',
-  }, { retryOnNetworkError: false });
-  if (!ok) {
-    return jsonResponse({ error: extractSriApiErrorMessage(retryResult) }, 400);
-  }
+  if (!isRideOnlyRetry) {
+    // Igual que en la emisión: nunca se reintenta a ciegas ante una
+    // excepción de red en una llamada que muta estado fiscal real.
+    const { ok, data: retryResult } = await sriApiFetch(`/sri/comprobantes/${doc.clave_acceso}/reintentar`, {
+      method: 'POST',
+    }, { retryOnNetworkError: false });
+    if (!ok) {
+      return jsonResponse({ error: extractSriApiErrorMessage(retryResult) }, 400);
+    }
 
-  const isAuthorized = retryResult.estado === 'AUTORIZADO';
-  if (!isAuthorized) {
-    const { error: updateError } = await supabaseClient
+    const isAuthorized = retryResult.estado === 'AUTORIZADO';
+    if (!isAuthorized) {
+      const { error: updateError } = await supabaseClient
+        .from('sri_documents')
+        .update({ status: 'REJECTED' })
+        .eq('id', sri_document_id);
+      if (updateError) throw updateError;
+      return jsonResponse({ error: retryResult.mensaje || 'El SRI volvió a rechazar el comprobante.' }, 400);
+    }
+
+    // Autorizado — marcar el estado local de inmediato. Todo lo que sigue
+    // (número de autorización, XML, RIDE, correo) es enriquecimiento
+    // best-effort: si algo de eso falla, el hecho de que el SRI autorizó el
+    // comprobante ya quedó guardado, nunca se pierde — ver Fase 6 del plan.
+    const { error: statusUpdateError } = await supabaseClient
       .from('sri_documents')
-      .update({ status: 'REJECTED' })
+      .update({ status: 'AUTHORIZED' })
       .eq('id', sri_document_id);
-    if (updateError) throw updateError;
-    return jsonResponse({ error: retryResult.mensaje || 'El SRI volvió a rechazar el comprobante.' }, 400);
+    if (statusUpdateError) throw statusUpdateError;
+  } else {
+    // Ya está AUTHORIZED (la emisión original, o un reintento previo, sí
+    // llegaron a ser autorizados por el SRI) y solo falta el RIDE —
+    // típicamente porque el servicio de RIDE estaba caído o tardó
+    // demasiado. Llamar aquí a /reintentar sería incorrecto: ese
+    // endpoint RESUBMITE un comprobante rechazado, no regenera el RIDE
+    // de uno ya autorizado. Se salta directo al bloque de enriquecimiento
+    // de abajo, que vuelve a pedir número de autorización + XML al SRI
+    // (nunca se perdieron) y regenera el RIDE a partir de eso.
   }
-
-  // Autorizado — marcar el estado local de inmediato. Todo lo que sigue
-  // (número de autorización, XML, RIDE, correo) es enriquecimiento
-  // best-effort: si algo de eso falla, el hecho de que el SRI autorizó el
-  // comprobante ya quedó guardado, nunca se pierde — ver Fase 6 del plan.
-  const { error: statusUpdateError } = await supabaseClient
-    .from('sri_documents')
-    .update({ status: 'AUTHORIZED' })
-    .eq('id', sri_document_id);
-  if (statusUpdateError) throw statusUpdateError;
 
   // El XML reenviado es exactamente el que ya se firmó en el intento
   // original — el comprador, régimen y ambiente que contiene quedaron

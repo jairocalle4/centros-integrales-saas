@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
 import { InvoiceStatusBadge, openInvoicePdf, retryInvoice, resendInvoiceEmail } from './PaymentDetailModal';
 import { CreditNoteModal } from './CreditNoteModal';
+import { InvoiceDetailModal } from './InvoiceDetailModal';
 import { SkeletonTable } from '../../components/ui/Skeleton';
 
 type SriDocumentRow = {
@@ -21,6 +22,7 @@ type SriDocumentRow = {
   created_at: string;
   document_type: string;
   documento_modificado_id: string | null;
+  motivo: string | null;
   internal_payments: { charges: { description: string } | null }[] | null;
 };
 
@@ -42,6 +44,7 @@ export function FacturasModule() {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [creditNoteTarget, setCreditNoteTarget] = useState<SriDocumentRow | null>(null);
+  const [detailTarget, setDetailTarget] = useState<SriDocumentRow | null>(null);
 
   // Ya están todas las sri_documents de este centro en `documents` (esta
   // tabla no filtra por document_type) — no hace falta una consulta
@@ -56,7 +59,7 @@ export function FacturasModule() {
       const { data, error } = await (supabase as any)
         .from('sri_documents')
         .select(
-          'id, status, clave_acceso, total, cliente_identificacion, cliente_razon_social, cliente_email, authorization_number, authorization_date, pdf_url, created_at, document_type, documento_modificado_id, internal_payments ( charges ( description ) )'
+          'id, status, clave_acceso, total, cliente_identificacion, cliente_razon_social, cliente_email, authorization_number, authorization_date, pdf_url, created_at, document_type, documento_modificado_id, motivo, internal_payments ( charges ( description ) )'
         )
         .eq('organization_id', currentOrg.id)
         .order('created_at', { ascending: false });
@@ -73,6 +76,16 @@ export function FacturasModule() {
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
+
+  // Si Reintentar/Reenviar desde dentro del modal de detalle trae (via
+  // loadDocuments) una versión más fresca de ese mismo comprobante, el
+  // modal se actualiza en el momento en vez de cerrarse — el usuario ve
+  // de inmediato que ya quedó con su RIDE listo, sin reabrir la fila.
+  useEffect(() => {
+    if (!detailTarget) return;
+    const fresh = documents.find((d) => d.id === detailTarget.id);
+    if (fresh && fresh !== detailTarget) setDetailTarget(fresh);
+  }, [documents, detailTarget]);
 
   const handleRetry = async (sriDocumentId: string) => {
     if (!currentOrg) return;
@@ -200,8 +213,10 @@ export function FacturasModule() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filtered.map((doc) => (
-                <tr key={doc.id} className="hover:bg-slate-50/50">
+              {filtered.map((doc) => {
+                const needsRetry = doc.status !== 'AUTHORIZED' || !doc.pdf_url;
+                return (
+                <tr key={doc.id} onClick={() => setDetailTarget(doc)} className="hover:bg-slate-50/50 cursor-pointer">
                   <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{formatDate(doc.created_at)}</td>
                   <td className="px-4 py-3 text-slate-900 font-medium max-w-xs truncate" title={describeInvoice(doc)}>
                     {describeInvoice(doc)}
@@ -218,8 +233,8 @@ export function FacturasModule() {
                   </td>
                   <td className="px-4 py-3 text-slate-400 font-mono text-xs">...{doc.clave_acceso.slice(-10)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      {doc.status === 'AUTHORIZED' ? (
+                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      {doc.status === 'AUTHORIZED' && (
                         <>
                           <button
                             onClick={() => doc.pdf_url && openInvoicePdf(doc.pdf_url)}
@@ -253,11 +268,12 @@ export function FacturasModule() {
                             </button>
                           )}
                         </>
-                      ) : (
+                      )}
+                      {needsRetry && (
                         <button
                           onClick={() => handleRetry(doc.id)}
                           disabled={retryingId === doc.id}
-                          title="Reintentar factura electrónica"
+                          title={doc.status === 'AUTHORIZED' ? 'Generar el RIDE pendiente de esta factura' : 'Reintentar factura electrónica'}
                           className="text-slate-500 hover:text-amber-700 hover:bg-amber-50 p-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
                         >
                           {retryingId === doc.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
@@ -266,7 +282,8 @@ export function FacturasModule() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -281,6 +298,18 @@ export function FacturasModule() {
         claveAcceso={creditNoteTarget.clave_acceso}
         total={Number(creditNoteTarget.total)}
         onIssued={() => { setCreditNoteTarget(null); loadDocuments(); }}
+      />
+    )}
+    {detailTarget && currentOrg && (
+      <InvoiceDetailModal
+        isOpen={Boolean(detailTarget)}
+        onClose={() => setDetailTarget(null)}
+        organizationId={currentOrg.id}
+        invoice={detailTarget}
+        concept={describeInvoice(detailTarget)}
+        hasAuthorizedCreditNote={detailTarget.document_type === '01' && hasAuthorizedCreditNote(detailTarget.id)}
+        modifiedDocument={documents.find((d) => d.id === detailTarget.documento_modificado_id) ?? null}
+        onChanged={loadDocuments}
       />
     )}
     </>

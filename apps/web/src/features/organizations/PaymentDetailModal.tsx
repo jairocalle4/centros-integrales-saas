@@ -134,6 +134,24 @@ export async function extractEdgeFunctionError(data: any, error: any): Promise<s
   return parsed?.error || 'Error desconocido.';
 }
 
+// true solo cuando estamos seguros de que NUESTRA función respondió y
+// rechazó la solicitud (4xx con cuerpo real, o data.error en una
+// respuesta 2xx, que llega con error=null) — false ante cualquier fallo
+// de red/gateway (504, FunctionsFetchError sin status) donde no sabemos
+// si el servidor terminó de procesar. Verificado contra el código real
+// de @supabase/functions-js (FunctionsClient.js): FunctionsHttpError y
+// FunctionsRelayError llevan el Response real en `context` (con
+// `.status`); FunctionsFetchError lleva el error de red crudo (sin
+// `.status`) cuando fetch() nunca llegó a recibir respuesta. Esta
+// función solo devuelve sus propios errores confirmados con 400 (ver
+// jsonResponse(..., 400) en la Edge Function) — nunca 5xx — así que
+// cualquier otro status (o su ausencia) es, por definición, inconcluso.
+export function isConfirmedFunctionRejection(error: any): boolean {
+  if (!error) return true;
+  const status = error?.context?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
 // email_status viene de handleEmit/handleRetry — distingue si la factura
 // se envió por correo, y si no, por qué (para poder decírselo al usuario
 // en vez de un silencio).
@@ -206,6 +224,17 @@ export async function issueCreditNote(
     },
   });
   if (error || (data as any)?.error) {
+    if (!isConfirmedFunctionRejection(error)) {
+      // Igual que en handleSaveAndInvoice: un timeout/gateway no
+      // significa que no se haya emitido — solo que no lo sabemos
+      // todavía. Afirmar "no se pudo emitir" acá sería tan engañoso
+      // como lo fue con el pago.
+      toast.error(
+        'No se pudo confirmar si la nota de crédito se emitió — el servidor tardó demasiado en responder. Revisa el módulo Facturas en un momento antes de reintentar.',
+        { duration: 8000 }
+      );
+      return false;
+    }
     const message = await extractEdgeFunctionError(data, error);
     toast.error('No se pudo emitir la nota de crédito: ' + message, { duration: 7000 });
     return false;
@@ -565,11 +594,11 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                               </span>
                             )
                           )}
-                          {payment.sri_document_id && payment.sri_documents && payment.sri_documents.status !== 'AUTHORIZED' && (
+                          {payment.sri_document_id && payment.sri_documents && (payment.sri_documents.status !== 'AUTHORIZED' || !payment.sri_documents.pdf_url) && (
                             <button
                               onClick={() => handleRetryInvoice(payment.sri_document_id!)}
                               disabled={retryingId === payment.sri_document_id}
-                              title="Reintentar factura electrónica"
+                              title={payment.sri_documents.status === 'AUTHORIZED' ? 'Generar el RIDE pendiente de esta factura' : 'Reintentar factura electrónica'}
                               className="text-slate-500 hover:text-amber-700 hover:bg-amber-50 p-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
                             >
                               {retryingId === payment.sri_document_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
@@ -779,10 +808,24 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
       if (error || (data as any)?.error) {
         const parsed = await parseEdgeFunctionErrorBody(data, error);
         const message = parsed?.error || 'Error desconocido.';
-        if (!parsed?.sri_document_id) {
-          // El intento nunca llegó a registrarse (ni siquiera rechazado
-          // por el SRI) — "Guardar y Facturar" es todo o nada: se revierte
-          // el pago recién insertado en vez de dejarlo huérfano sin factura.
+        if (!isConfirmedFunctionRejection(error)) {
+          // Inconcluso — timeout de gateway (504), error de red, o
+          // cualquier respuesta sin un status 4xx confirmado de NUESTRA
+          // función: no sabemos si la factura se llegó a generar. Este es
+          // exactamente el incidente real que motivó este chequeo: la
+          // Edge Function tardó demasiado generando el RIDE, el navegador
+          // recibió un 504, pero la factura SÍ quedó autorizada por el
+          // SRI y el pago SÍ siguió vinculado. Nunca se borra el pago
+          // recién guardado ante esta incertidumbre.
+          toast.error(
+            'No se pudo confirmar si la factura se generó — el servidor tardó demasiado en responder. Tu pago SÍ se guardó; revisa el módulo Facturas en un momento, o usa "Reintentar" ahí si la factura queda pendiente de RIDE.',
+            { duration: 9000 }
+          );
+        } else if (!parsed?.sri_document_id) {
+          // Nuestra función respondió y confirmó que el intento nunca
+          // llegó a registrarse (ni siquiera rechazado por el SRI) —
+          // "Guardar y Facturar" es todo o nada: se revierte el pago
+          // recién insertado en vez de dejarlo huérfano sin factura.
           await supabase.from('internal_payments').delete().eq('id', paymentId);
           toast.error('No se pudo facturar — el pago NO se guardó: ' + message, { duration: 7000 });
         } else {
