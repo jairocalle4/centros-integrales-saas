@@ -977,6 +977,7 @@ export type Database = {
           brevo_sender_name: string | null
           id: boolean
           iva_percentage: number
+          payment_grace_period_days: number
           updated_at: string
         }
         Insert: {
@@ -985,6 +986,7 @@ export type Database = {
           brevo_sender_name?: string | null
           id?: boolean
           iva_percentage?: number
+          payment_grace_period_days?: number
           updated_at?: string
         }
         Update: {
@@ -993,6 +995,7 @@ export type Database = {
           brevo_sender_name?: string | null
           id?: boolean
           iva_percentage?: number
+          payment_grace_period_days?: number
           updated_at?: string
         }
         Relationships: []
@@ -1482,6 +1485,7 @@ export type Database = {
         Returns: string
       }
       create_organization: { Args: { org_name: string }; Returns: string }
+      enforce_payment_grace_period: { Args: never; Returns: undefined }
       get_organization_invitations: {
         Args: { p_organization_id: string }
         Returns: {

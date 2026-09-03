@@ -128,6 +128,11 @@ export function PlatformDashboard() {
   const [ivaPercentage, setIvaPercentage] = useState<number>(15);
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // Plazo de gracia antes de suspender automáticamente un centro con un
+  // cobro vencido (enforce_payment_grace_period, cron diario).
+  const [gracePeriodDays, setGracePeriodDays] = useState<number>(15);
+  const [savingGracePeriod, setSavingGracePeriod] = useState(false);
+
   // Brevo (envío de facturas por correo) — brevoApiKeyInput es write-only:
   // nunca se carga desde la base de datos, solo viaja hacia ella cuando el
   // superadmin escribe una nueva. brevoConfigured es un booleano derivado
@@ -161,7 +166,7 @@ export function PlatformDashboard() {
     const loadPlatformSettings = async () => {
       const { data } = await supabase
         .from('platform_settings')
-        .select('iva_percentage, brevo_api_key, brevo_sender_email, brevo_sender_name')
+        .select('iva_percentage, brevo_api_key, brevo_sender_email, brevo_sender_name, payment_grace_period_days')
         .eq('id', true)
         .maybeSingle();
       if (data) {
@@ -171,6 +176,7 @@ export function PlatformDashboard() {
         setBrevoConfigured(Boolean(data.brevo_api_key));
         setBrevoSenderEmail(data.brevo_sender_email || '');
         setBrevoSenderName(data.brevo_sender_name || '');
+        setGracePeriodDays(Number(data.payment_grace_period_days ?? 15));
       }
     };
     loadPlatformSettings();
@@ -342,6 +348,23 @@ export function PlatformDashboard() {
       toast.error('Error guardando configuración: ' + err.message);
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleSaveGracePeriod = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingGracePeriod(true);
+    try {
+      const { error } = await supabase
+        .from('platform_settings')
+        .update({ payment_grace_period_days: gracePeriodDays })
+        .eq('id', true);
+      if (error) throw error;
+      toast.success('Plazo de gracia actualizado.');
+    } catch (err: any) {
+      toast.error('Error guardando el plazo de gracia: ' + err.message);
+    } finally {
+      setSavingGracePeriod(false);
     }
   };
 
@@ -1584,6 +1607,40 @@ export function PlatformDashboard() {
                     >
                       {savingBrevo && <Loader2 className="w-4 h-4 animate-spin" />}
                       {savingBrevo ? 'Guardando...' : 'Guardar Configuración'}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
+                  <h2 className="text-lg font-bold text-slate-900 mb-1">Suspensión Automática por Falta de Pago</h2>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Si un centro tiene un cargo pendiente vencido por más de este plazo, se
+                    suspende automáticamente (una vez al día) — pierde acceso hasta que
+                    confirmes su pago. Mientras el plazo no se cumpla, el centro sigue activo
+                    con normalidad.
+                  </p>
+
+                  <form onSubmit={handleSaveGracePeriod} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Días de gracia</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={gracePeriodDays}
+                        onChange={(e) => setGracePeriodDays(parseInt(e.target.value, 10) || 1)}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={savingGracePeriod}
+                      className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingGracePeriod && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {savingGracePeriod ? 'Guardando...' : 'Guardar Configuración'}
                     </button>
                   </form>
                 </div>
