@@ -3,6 +3,7 @@ import { useAuth } from '../features/auth/AuthProvider';
 import { OrgProvider, useOrg } from '../features/organizations/OrgContext';
 import type { Organization } from '../features/organizations/OrgContext';
 import { SuspendedTenant } from '../features/organizations/SuspendedTenant';
+import { BillingGraceAlert } from '../features/organizations/BillingGraceAlert';
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -264,7 +265,7 @@ function SelectOrganizationScreen({
 
 function LayoutContent() {
   const { user, signOut } = useAuth();
-  const { currentOrg, organizations, isLoading, setCurrentOrg, isActive, refreshOrgs, hasElectronicBilling } = useOrg();
+  const { currentOrg, organizations, isLoading, setCurrentOrg, isActive, currentRole, refreshOrgs, hasElectronicBilling } = useOrg();
   const navItems = buildNavItems(hasElectronicBilling);
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -596,6 +597,13 @@ function LayoutContent() {
           </div>
         </div>
       </main>
+
+      {/* Aviso de plan vencido — solo mientras el centro sigue activo
+          (isActive) y solo para el dueño; SuspendedTenant ya cubre el
+          caso de que la suspensión automática ya haya ocurrido. */}
+      {isActive && currentRole === 'owner' && currentOrg && (
+        <BillingGraceAlert organizationId={currentOrg.id} />
+      )}
     </div>
   );
 }

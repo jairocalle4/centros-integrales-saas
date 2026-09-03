@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../auth/AuthProvider';
 import toast from 'react-hot-toast';
 import { formatDate } from '../../lib/formatDate';
-import { Loader2 } from 'lucide-react';
+import { Loader2, User, Settings, Percent, Mail, ShieldAlert } from 'lucide-react';
 
 type Organization = {
   id: string;
@@ -547,7 +547,11 @@ export function PlatformDashboard() {
           }
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          {activeTab === 'dashboard' ? 'Visión ejecutiva de ingresos, clientes y salud global de la plataforma.' : 'Panel de control de operaciones globales y tenants de la plataforma.'}
+          {
+            activeTab === 'dashboard' ? 'Visión ejecutiva de ingresos, clientes y salud global de la plataforma.' :
+            activeTab === 'settings' ? 'Administra tu cuenta, el equipo de superadministradores y los parámetros globales de facturación y cobranza de la plataforma.' :
+            'Panel de control de operaciones globales y tenants de la plataforma.'
+          }
         </p>
       </header>
 
@@ -1287,24 +1291,24 @@ export function PlatformDashboard() {
               <button
                 type="button"
                 onClick={() => setConfigSubTab('cuenta')}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                   configSubTab === 'cuenta'
                     ? 'bg-white text-indigo-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                👤 Mi Cuenta
+                <User className="w-3.5 h-3.5" /> Mi Cuenta
               </button>
               <button
                 type="button"
                 onClick={() => setConfigSubTab('plataforma')}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                   configSubTab === 'plataforma'
                     ? 'bg-white text-indigo-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                ⚙️ Plataforma
+                <Settings className="w-3.5 h-3.5" /> Plataforma
               </button>
             </div>
 
@@ -1516,10 +1520,18 @@ export function PlatformDashboard() {
             )}
 
             {configSubTab === 'plataforma' && (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start animate-fadeIn">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-start animate-fadeIn">
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Impuestos</h2>
-                  <p className="text-sm text-slate-500 mb-4">
+                  <div className="flex items-start gap-3 mb-1">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                      <Percent className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider">Facturación Electrónica</p>
+                      <h2 className="text-lg font-bold text-slate-900">Impuestos</h2>
+                    </div>
+                  </div>
+                  <p className="text-sm text-slate-500 mb-4 mt-3">
                     Porcentaje de IVA usado como referencia para la facturación electrónica.
                     Por ahora los montos se registran ya incluyendo IVA — este valor todavía
                     no se aplica automáticamente en ningún cálculo.
@@ -1552,15 +1564,23 @@ export function PlatformDashboard() {
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-                  <div className="flex items-center justify-between mb-1">
-                    <h2 className="text-lg font-bold text-slate-900">Correo de Facturas (Brevo)</h2>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                  <div className="flex items-start justify-between gap-3 mb-1">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                        <Mail className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-bold text-blue-500 uppercase tracking-wider">Comunicaciones</p>
+                        <h2 className="text-lg font-bold text-slate-900">Correo de Facturas (Brevo)</h2>
+                      </div>
+                    </div>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${
                       brevoConfigured ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
                     }`}>
                       {brevoConfigured ? 'Configurada' : 'Sin configurar'}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-500 mb-4">
+                  <p className="text-sm text-slate-500 mb-4 mt-3">
                     Credenciales de la API transaccional de Brevo usadas para enviar automáticamente el RIDE y el XML de cada factura autorizada al correo del cliente. Se comparte entre todos los centros de la plataforma.
                   </p>
 
@@ -1612,8 +1632,16 @@ export function PlatformDashboard() {
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-                  <h2 className="text-lg font-bold text-slate-900 mb-1">Suspensión Automática por Falta de Pago</h2>
-                  <p className="text-sm text-slate-500 mb-4">
+                  <div className="flex items-start gap-3 mb-1">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                      <ShieldAlert className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">Cobranza y Suscripciones</p>
+                      <h2 className="text-lg font-bold text-slate-900">Suspensión Automática por Falta de Pago</h2>
+                    </div>
+                  </div>
+                  <p className="text-sm text-slate-500 mb-4 mt-3">
                     Si un centro tiene un cargo pendiente vencido por más de este plazo, se
                     suspende automáticamente (una vez al día) — pierde acceso hasta que
                     confirmes su pago. Mientras el plazo no se cumpla, el centro sigue activo

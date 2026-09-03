@@ -1486,6 +1486,16 @@ export type Database = {
       }
       create_organization: { Args: { org_name: string }; Returns: string }
       enforce_payment_grace_period: { Args: never; Returns: undefined }
+      get_organization_billing_alert: {
+        Args: { p_org_id: string }
+        Returns: {
+          amount: number
+          days_remaining: number
+          due_date: string
+          grace_period_days: number
+          is_overdue: boolean
+        }[]
+      }
       get_organization_invitations: {
         Args: { p_organization_id: string }
         Returns: {
