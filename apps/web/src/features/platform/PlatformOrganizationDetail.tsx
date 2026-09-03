@@ -62,12 +62,22 @@ type OrgInvitation = {
   created_at: string;
 };
 
+type PaymentRecord = {
+  id: string;
+  amount: number;
+  billing_cycle: 'monthly' | 'annual' | null;
+  payment_date: string;
+  reference: string | null;
+  status: string;
+};
+
 export function PlatformOrganizationDetail() {
   const { id: orgId } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [invitations, setInvitations] = useState<OrgInvitation[]>([]);
+  const [paymentHistory, setPaymentHistory] = useState<PaymentRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'members' | 'invitations' | 'payments' | 'billing'>('members');
 
   // Facturación electrónica SRI
@@ -167,12 +177,20 @@ export function PlatformOrganizationDetail() {
       .eq('organization_id', orgId)
       .maybeSingle();
 
+    // 7. Historial de pagos de plataforma (más reciente primero).
+    const { data: paymentsData } = await supabase
+      .from('payments')
+      .select('id, amount, billing_cycle, payment_date, reference, status')
+      .eq('organization_id', orgId)
+      .order('payment_date', { ascending: false });
+
     return {
       organization: org,
       availablePlans: (plansData as SubscriptionPlan[]) || [],
       users: (usersData as unknown as OrgUser[]) || [],
       invitations: (invData as unknown as OrgInvitation[]) || [],
       sriConfig: (sriData as SriConfig) || null,
+      paymentHistory: (paymentsData as PaymentRecord[]) || [],
     };
   }, [orgId]);
 
@@ -198,6 +216,7 @@ export function PlatformOrganizationDetail() {
     setInvitations(orgDetailData.invitations);
     setSriConfig(orgDetailData.sriConfig);
     setAvailablePlans(orgDetailData.availablePlans);
+    setPaymentHistory(orgDetailData.paymentHistory);
   }, [orgDetailData]);
 
   // Estos dos son borradores editables (el superadmin puede cambiar la
@@ -693,6 +712,54 @@ export function PlatformOrganizationDetail() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Historial de pagos */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-indigo-500" />
+                  Historial de Pagos
+                </h3>
+              </div>
+              {paymentHistory.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-sm">
+                  Todavía no se ha registrado ningún pago para este centro.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-slate-600">
+                    <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
+                      <tr>
+                        <th className="px-6 py-3">Fecha</th>
+                        <th className="px-6 py-3">Monto</th>
+                        <th className="px-6 py-3">Ciclo</th>
+                        <th className="px-6 py-3">Referencia</th>
+                        <th className="px-6 py-3">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {paymentHistory.map(p => (
+                        <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-3 text-slate-400 whitespace-nowrap">{formatDate(p.payment_date)}</td>
+                          <td className="px-6 py-3 font-semibold text-slate-900">${Number(p.amount).toFixed(2)}</td>
+                          <td className="px-6 py-3">{p.billing_cycle === 'annual' ? 'Anual' : p.billing_cycle === 'monthly' ? 'Mensual' : '—'}</td>
+                          <td className="px-6 py-3 text-slate-500">{p.reference || '—'}</td>
+                          <td className="px-6 py-3">
+                            {p.status === 'completed' ? (
+                              <span className="flex items-center gap-1.5 text-emerald-600 font-medium"><Check className="w-4 h-4" /> Completado</span>
+                            ) : p.status === 'refunded' ? (
+                              <span className="flex items-center gap-1.5 text-amber-600 font-medium">Reembolsado</span>
+                            ) : (
+                              <span className="flex items-center gap-1.5 text-red-600 font-medium"><AlertCircle className="w-4 h-4" /> Fallido</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
