@@ -271,7 +271,12 @@ function DonutChart({
   let cumulativeAngle = -90;
 
   return (
-    <div className="flex items-center gap-6">
+    // Antes iba lado a lado con la dona (140px) + leyenda — en tarjetas
+    // angostas (3-4 columnas) el monto y el porcentaje no cabían y se
+    // salían del borde de la tarjeta. Apilado (dona arriba, leyenda abajo
+    // a todo el ancho) la leyenda siempre tiene todo el ancho disponible
+    // de la tarjeta, sin importar qué tan angosta sea.
+    <div className="flex flex-col items-center gap-4 w-full min-w-0">
       <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0">
         <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#f1f5f9" strokeWidth="20" />
         {stats.map((stat, i) => {
@@ -301,9 +306,9 @@ function DonutChart({
         </text>
         <text x={cx} y={cy + 12} textAnchor="middle" fontSize="9" fill="#94a3b8">{centerLabel}</text>
       </svg>
-      <div className="space-y-2.5 min-w-0 flex-1">
+      <div className="w-full space-y-2.5 min-w-0">
         {stats.map((stat, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div key={i} className="flex items-center gap-2 min-w-0">
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: stat.color }} />
             <span className="text-xs text-slate-600 truncate flex-1 min-w-0" title={stat.label}>{stat.label}</span>
             <span className="text-xs font-bold text-slate-800 shrink-0">{formatValue(stat.value)}</span>
@@ -317,6 +322,17 @@ function DonutChart({
   );
 }
 
+// Alto reservado para las barras y para la etiqueta de monto por encima de
+// ellas — separados a propósito: antes la etiqueta se ubicaba con un % de
+// una altura en px (confundiendo unidades) y con la barra más alta
+// terminaba con `top: 0` desplazada además hacia arriba por su propio
+// alto, saliéndose del todo de la tarjeta (se veía tapando el título
+// "Ingresos"). Con alto de barra y espacio de etiqueta fijos en píxeles,
+// ninguna etiqueta puede salirse del contenedor sin importar qué tan alta
+// sea la barra.
+const BAR_MAX_HEIGHT = 92;
+const BAR_LABEL_SPACE = 26;
+
 function BarChart({ data }: { data: TrendPoint[] }) {
   const maxVal = Math.max(...data.map((d) => d.amount), 1);
   // Con muchas barras (ej. 31 días) mostrar una etiqueta de eje por cada una
@@ -329,27 +345,27 @@ function BarChart({ data }: { data: TrendPoint[] }) {
   const nonZeroCount = data.filter((d) => d.amount > 0).length;
   const alwaysShowAmount = nonZeroCount > 0 && nonZeroCount <= 12;
   return (
-    <div className="flex items-end gap-1.5 h-36 w-full">
+    <div className="flex items-end gap-1.5 w-full" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }}>
       {data.map((d, i) => {
-        const heightPct = (d.amount / maxVal) * 100;
+        const barHeightPx = maxVal > 0 ? Math.max((d.amount / maxVal) * BAR_MAX_HEIGHT, d.amount > 0 ? 4 : 0) : 0;
         const isLast = i === data.length - 1;
         const showAxisLabel = isLast || i % labelEvery === 0;
         return (
           <div key={d.key} className="flex flex-col items-center gap-1 flex-1 group/bar min-w-0">
-            <div className="relative w-full flex items-end justify-center" style={{ height: '104px' }}>
+            <div className="relative w-full flex items-end justify-center" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }}>
               {d.amount > 0 && (
                 <div
-                  className={`absolute bottom-0 text-[9px] font-bold text-white bg-slate-800 rounded px-1.5 py-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap z-10 transition-opacity ${
+                  className={`absolute text-[9px] font-bold text-white bg-slate-800 rounded px-1.5 py-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap z-10 transition-opacity ${
                     alwaysShowAmount ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'
                   }`}
-                  style={{ top: `${Math.max(0, 100 - heightPct)}px`, transform: 'translate(-50%, calc(-100% - 4px))' }}
+                  style={{ bottom: `${barHeightPx + 4}px` }}
                 >
                   {fmt(d.amount)}
                 </div>
               )}
               <div
                 className={`w-full rounded-t-lg transition-all duration-500 ${isLast ? 'bg-indigo-500' : 'bg-indigo-200 group-hover/bar:bg-indigo-300'}`}
-                style={{ height: `${Math.max(heightPct, d.amount > 0 ? 4 : 0)}%` }}
+                style={{ height: `${barHeightPx}px` }}
               />
             </div>
             <span className={`text-[9px] font-medium truncate ${isLast ? 'text-indigo-600' : 'text-slate-400'}`}>
@@ -1156,9 +1172,9 @@ export function FinancialDashboard() {
             </div>
             <div className="flex-1 flex items-end mt-3">
               {loading ? (
-                <div className="h-36 w-full animate-pulse bg-slate-100 rounded-xl" />
+                <div className="w-full animate-pulse bg-slate-100 rounded-xl" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }} />
               ) : (data?.revenueTrend || []).every((d) => d.amount === 0) ? (
-                <div className="h-36 w-full flex items-center justify-center text-slate-400 text-sm">Sin ingresos en el período</div>
+                <div className="w-full flex items-center justify-center text-slate-400 text-sm" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }}>Sin ingresos en el período</div>
               ) : (
                 <BarChart data={data?.revenueTrend || []} />
               )}

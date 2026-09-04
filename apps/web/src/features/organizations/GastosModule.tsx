@@ -71,9 +71,21 @@ function ExpenseFormModal({
   onSaved: () => void;
 }) {
   const isEdit = Boolean(expense);
+  // Todas las categorías curadas salvo 'Otro' (siempre la última) — sirve
+  // para reconocer si un gasto existente tiene una categoría personalizada
+  // (guardada como texto libre) y así reabrir el formulario con "Otro"
+  // seleccionado y el texto real precargado, en vez de perderlo.
+  const knownCategories = EXPENSE_CATEGORIES.slice(0, -1);
+  const hasCustomCategory = Boolean(expense) && !knownCategories.includes(expense!.category);
+
   const [description, setDescription] = useState(expense?.description ?? '');
-  const [category, setCategory] = useState(expense?.category ?? EXPENSE_CATEGORIES[0]);
-  const [amount, setAmount] = useState<number | ''>(expense?.amount ?? '');
+  const [category, setCategory] = useState(hasCustomCategory ? 'Otro' : (expense?.category ?? EXPENSE_CATEGORIES[0]));
+  const [customCategory, setCustomCategory] = useState(hasCustomCategory ? expense!.category : '');
+  // Texto libre, no type="number": en algunos navegadores/SO, un
+  // <input type="number"> exige la coma como separador decimal según el
+  // idioma regional del sistema y rechaza el punto — con texto libre el
+  // punto SIEMPRE funciona, sin depender del locale del dispositivo.
+  const [amountText, setAmountText] = useState(expense ? String(expense.amount) : '');
   const [expenseDate, setExpenseDate] = useState(expense?.expense_date ?? new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState(expense?.payment_method ?? '');
   const [vendor, setVendor] = useState(expense?.vendor ?? '');
@@ -81,11 +93,23 @@ function ExpenseFormModal({
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const handleAmountChange = (raw: string) => {
+    // Solo dígitos y un único punto decimal — una coma que el usuario
+    // escriba se normaliza a punto en vez de rechazarse.
+    let v = raw.replace(',', '.').replace(/[^0-9.]/g, '');
+    const firstDot = v.indexOf('.');
+    if (firstDot !== -1) v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, '');
+    setAmountText(v);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const finalCategory = category === 'Otro' && customCategory.trim() ? customCategory.trim() : category;
+    const amount = amountText === '' ? 0 : Number(amountText);
     if (!description.trim()) { toast.error('La descripción es obligatoria.'); return; }
-    if (!amount || Number(amount) <= 0) { toast.error('Ingresa un monto válido.'); return; }
+    if (!amount || amount <= 0) { toast.error('Ingresa un monto válido.'); return; }
     if (!expenseDate) { toast.error('La fecha es obligatoria.'); return; }
+    if (category === 'Otro' && !customCategory.trim()) { toast.error('Escribe el nombre de la categoría.'); return; }
 
     setSubmitting(true);
     try {
@@ -105,8 +129,8 @@ function ExpenseFormModal({
       const payload = {
         organization_id: organizationId,
         description: description.trim(),
-        category,
-        amount: Number(amount),
+        category: finalCategory,
+        amount,
         expense_date: expenseDate,
         payment_method: paymentMethod || null,
         vendor: vendor.trim() || null,
@@ -166,15 +190,25 @@ function ExpenseFormModal({
               >
                 {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
+              {category === 'Otro' && (
+                <input
+                  type="text"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="Especifica la categoría"
+                  className="w-full mt-2 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Monto (USD) *</label>
               <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                type="text"
+                inputMode="decimal"
+                value={amountText}
+                onChange={(e) => handleAmountChange(e.target.value)}
+                placeholder="0.00"
                 className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 required
               />
@@ -231,16 +265,19 @@ function ExpenseFormModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Comprobante (foto o PDF)</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Comprobante (opcional)</label>
             <input
               type="file"
               accept="image/*,application/pdf"
+              capture="environment"
               onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
               className="w-full text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
             />
-            {expense?.receipt_path && !receiptFile && (
-              <p className="text-[11px] text-slate-400 mt-1">Ya tiene un comprobante — sube uno nuevo para reemplazarlo.</p>
-            )}
+            <p className="text-[11px] text-slate-400 mt-1">
+              {expense?.receipt_path && !receiptFile
+                ? 'Ya tiene un comprobante — sube uno nuevo para reemplazarlo.'
+                : 'Puedes tomar una foto del recibo o subir un PDF/imagen ya guardada.'}
+            </p>
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
