@@ -298,13 +298,13 @@ function DonutChart({
         </text>
         <text x={cx} y={cy + 12} textAnchor="middle" fontSize="9" fill="#94a3b8">{centerLabel}</text>
       </svg>
-      <div className="space-y-2 min-w-0">
+      <div className="space-y-2.5 min-w-0 flex-1">
         {stats.map((stat, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: stat.color }} />
-            <span className="text-xs text-slate-600 truncate">{stat.label}</span>
-            <span className="ml-auto text-xs font-bold text-slate-800 shrink-0">{formatValue(stat.value)}</span>
-            <span className="text-[10px] text-slate-400 w-8 text-right shrink-0">
+            <span className="text-xs text-slate-600 truncate flex-1 min-w-0" title={stat.label}>{stat.label}</span>
+            <span className="text-xs font-bold text-slate-800 shrink-0">{formatValue(stat.value)}</span>
+            <span className="text-[10px] text-slate-400 w-9 text-right shrink-0">
               {total > 0 ? `${Math.round((stat.value / total) * 100)}%` : '0%'}
             </span>
           </div>
@@ -316,22 +316,30 @@ function DonutChart({
 
 function BarChart({ data }: { data: TrendPoint[] }) {
   const maxVal = Math.max(...data.map((d) => d.amount), 1);
-  // Con muchas barras (ej. 31 días) mostrar una etiqueta por cada una se
-  // amontona — se muestra 1 de cada N, siempre incluyendo la última.
+  // Con muchas barras (ej. 31 días) mostrar una etiqueta de eje por cada una
+  // se amontona — se muestra 1 de cada N, siempre incluyendo la última.
   const labelEvery = data.length > 15 ? Math.ceil(data.length / 10) : 1;
+  // El monto de cada barra solo se veía al pasar el mouse — invisible en
+  // móvil y en capturas de pantalla. Con pocas barras con datos (lo normal:
+  // la mayoría de días sin pagos) se muestra siempre; con muchas, se vuelve
+  // a hover para no amontonar el gráfico.
+  const nonZeroCount = data.filter((d) => d.amount > 0).length;
+  const alwaysShowAmount = nonZeroCount > 0 && nonZeroCount <= 12;
   return (
-    <div className="flex items-end gap-1.5 h-32 w-full">
+    <div className="flex items-end gap-1.5 h-36 w-full">
       {data.map((d, i) => {
         const heightPct = (d.amount / maxVal) * 100;
         const isLast = i === data.length - 1;
-        const showLabel = isLast || i % labelEvery === 0;
+        const showAxisLabel = isLast || i % labelEvery === 0;
         return (
           <div key={d.key} className="flex flex-col items-center gap-1 flex-1 group/bar min-w-0">
-            <div className="relative w-full flex items-end justify-center" style={{ height: '100px' }}>
+            <div className="relative w-full flex items-end justify-center" style={{ height: '104px' }}>
               {d.amount > 0 && (
                 <div
-                  className="absolute bottom-0 text-[9px] font-semibold text-white opacity-0 group-hover/bar:opacity-100 transition-opacity bg-slate-800/80 rounded px-1 py-0.5 -top-5 left-1/2 -translate-x-1/2 whitespace-nowrap z-10"
-                  style={{ top: `${100 - heightPct}px`, transform: 'translate(-50%, -100%)' }}
+                  className={`absolute bottom-0 text-[9px] font-bold text-white bg-slate-800 rounded px-1.5 py-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap z-10 transition-opacity ${
+                    alwaysShowAmount ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'
+                  }`}
+                  style={{ top: `${Math.max(0, 100 - heightPct)}px`, transform: 'translate(-50%, calc(-100% - 4px))' }}
                 >
                   {fmt(d.amount)}
                 </div>
@@ -342,7 +350,7 @@ function BarChart({ data }: { data: TrendPoint[] }) {
               />
             </div>
             <span className={`text-[9px] font-medium truncate ${isLast ? 'text-indigo-600' : 'text-slate-400'}`}>
-              {showLabel ? d.label : ''}
+              {showAxisLabel ? d.label : ''}
             </span>
           </div>
         );
@@ -1077,51 +1085,69 @@ export function FinancialDashboard() {
         </div>
 
         {/* ── Charts Row: Tendencia + Asistencia + Método de Pago ────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <div className="flex items-center justify-between mb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-stretch">
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col">
+            <div className="flex items-start justify-between mb-1">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Ingresos</h3>
                 <p className="text-xs text-slate-400">{appliedLabel}</p>
               </div>
-              <div className="w-3 h-3 rounded-full bg-indigo-500" />
+              {!loading && (
+                <p className="text-xl font-extrabold text-indigo-600 tracking-tight">{fmt(data?.revenueInRange || 0)}</p>
+              )}
             </div>
-            {loading ? (
-              <div className="h-32 animate-pulse bg-slate-100 rounded-xl" />
-            ) : (
-              <BarChart data={data?.revenueTrend || []} />
-            )}
+            <div className="flex-1 flex items-end mt-3">
+              {loading ? (
+                <div className="h-36 w-full animate-pulse bg-slate-100 rounded-xl" />
+              ) : (data?.revenueTrend || []).every((d) => d.amount === 0) ? (
+                <div className="h-36 w-full flex items-center justify-center text-slate-400 text-sm">Sin ingresos en el período</div>
+              ) : (
+                <BarChart data={data?.revenueTrend || []} />
+              )}
+            </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <div className="mb-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col">
+            <div className="mb-1">
               <h3 className="text-sm font-bold text-slate-900">Asistencia</h3>
               <p className="text-xs text-slate-400">Distribución de sesiones — {appliedLabel}</p>
             </div>
-            {loading ? (
-              <div className="h-32 animate-pulse bg-slate-100 rounded-xl" />
-            ) : attTotal === 0 ? (
-              <div className="h-32 flex items-center justify-center text-slate-400 text-sm">Sin datos de asistencia</div>
-            ) : (
-              <DonutChart stats={data!.attendanceStats} total={attTotal} centerLabel="sesiones" />
-            )}
+            <div className="flex-1 flex items-center justify-center mt-3 min-h-[150px]">
+              {loading ? (
+                <div className="h-32 w-full animate-pulse bg-slate-100 rounded-xl" />
+              ) : attTotal === 0 ? (
+                <div className="flex flex-col items-center gap-2 text-slate-400">
+                  <svg className="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <span className="text-sm">Sin datos de asistencia</span>
+                </div>
+              ) : (
+                <DonutChart stats={data!.attendanceStats} total={attTotal} centerLabel="sesiones" />
+              )}
+            </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <CreditCard className="w-4 h-4 text-slate-400" />
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col">
+            <div className="flex items-center gap-2 mb-1">
+              <CreditCard className="w-4 h-4 text-slate-400 shrink-0" />
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Método de Pago</h3>
                 <p className="text-xs text-slate-400">{appliedLabel}</p>
               </div>
             </div>
-            {loading ? (
-              <div className="h-32 animate-pulse bg-slate-100 rounded-xl" />
-            ) : methodTotal === 0 ? (
-              <div className="h-32 flex items-center justify-center text-slate-400 text-sm">Sin pagos en el período</div>
-            ) : (
-              <DonutChart stats={data!.paymentMethodStats} total={methodTotal} centerLabel="cobrado" formatValue={fmt} />
-            )}
+            <div className="flex-1 flex items-center justify-center mt-3 min-h-[150px]">
+              {loading ? (
+                <div className="h-32 w-full animate-pulse bg-slate-100 rounded-xl" />
+              ) : methodTotal === 0 ? (
+                <div className="flex flex-col items-center gap-2 text-slate-400">
+                  <CreditCard className="w-8 h-8 text-slate-300" />
+                  <span className="text-sm">Sin pagos en el período</span>
+                </div>
+              ) : (
+                <DonutChart stats={data!.paymentMethodStats} total={methodTotal} centerLabel="cobrado" formatValue={fmt} />
+              )}
+            </div>
           </div>
         </div>
 
