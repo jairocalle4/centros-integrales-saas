@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
 import { Link } from 'react-router';
 import toast from 'react-hot-toast';
-import { Calendar, Search, Loader2, CreditCard, Receipt } from 'lucide-react';
+import { Calendar, Search, Loader2, CreditCard } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,7 +55,6 @@ type DashboardData = {
   revenueTrend: TrendPoint[];
   attendanceStats: DonutStat[];
   paymentMethodStats: DonutStat[];
-  sriStats: DonutStat[] | null; // null si el centro no tiene facturación electrónica
   topServices: ServiceRevenue[];
   // Alerts (siempre a hoy)
   overdueCharges: OverdueCharge[];
@@ -494,7 +493,7 @@ function DateRangeControl({
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function FinancialDashboard() {
-  const { currentOrg, hasElectronicBilling } = useOrg();
+  const { currentOrg } = useOrg();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(new Date());
@@ -551,7 +550,6 @@ export function FinancialDashboard() {
         appointmentsAllRes,
         appointmentsRangeRes,
         overdueChargesRes,
-        sriDocsRes,
       ] = await Promise.all([
         // 1. Pagos del rango — alimenta ingresos, tendencia, método de pago,
         // servicios por ingreso y ticket promedio, todo desde una sola
@@ -654,16 +652,6 @@ export function FinancialDashboard() {
           .lt('due_date', overdueDate)
           .order('due_date', { ascending: true })
           .limit(8),
-
-        // 13. Comprobantes electrónicos del rango (solo si aplica al plan)
-        hasElectronicBilling
-          ? (supabase as any)
-              .from('sri_documents')
-              .select('status, document_type')
-              .eq('organization_id', currentOrg.id)
-              .gte('created_at', rangeStart + 'T00:00:00')
-              .lte('created_at', rangeEnd + 'T23:59:59')
-          : Promise.resolve({ data: null }),
       ]);
 
       // ─── Ingresos del rango + comparación vs. período anterior ───────────
@@ -742,20 +730,6 @@ export function FinancialDashboard() {
       const scheduledAppointments = scheduledNow.length;
       const pendingDeposits = scheduledNow.reduce((sum: number, a: any) => sum + Number(a.deposit_amount || 0), 0);
 
-      // ─── Facturación electrónica del rango (si aplica) ───────────────────
-      let sriStats: DonutStat[] | null = null;
-      if (hasElectronicBilling && sriDocsRes?.data) {
-        const docs = sriDocsRes.data as any[];
-        const facturasOk = docs.filter((d) => d.document_type === '01' && d.status === 'AUTHORIZED').length;
-        const facturasMal = docs.filter((d) => d.document_type === '01' && d.status !== 'AUTHORIZED').length;
-        const notasCredito = docs.filter((d) => d.document_type === '04').length;
-        sriStats = [
-          { value: facturasOk, color: '#10b981', label: 'Facturas autorizadas' },
-          { value: facturasMal, color: '#f43f5e', label: 'Facturas rechazadas' },
-          { value: notasCredito, color: '#6366f1', label: 'Notas de crédito' },
-        ].filter((s) => s.value > 0);
-      }
-
       // ─── Cobros vencidos (detalle) — a hoy ────────────────────────────────
       const overdueCharges: OverdueCharge[] = (overdueChargesRes.data || []).map((c: any) => {
         const ben = c.beneficiaries;
@@ -814,7 +788,6 @@ export function FinancialDashboard() {
         revenueTrend,
         attendanceStats,
         paymentMethodStats,
-        sriStats,
         topServices,
         overdueCharges,
         alerts,
@@ -826,7 +799,7 @@ export function FinancialDashboard() {
       setLoading(false);
       setLastRefresh(new Date());
     }
-  }, [currentOrg, appliedRange, hasElectronicBilling]);
+  }, [currentOrg, appliedRange]);
 
   useEffect(() => {
     loadDashboard();
@@ -839,7 +812,6 @@ export function FinancialDashboard() {
   const revTrendUp = data ? data.revenueInRange >= data.revenuePriorPeriod : true;
   const attTotal = data?.attendanceStats.reduce((s, a) => s + a.value, 0) ?? 0;
   const methodTotal = data?.paymentMethodStats.reduce((s, a) => s + a.value, 0) ?? 0;
-  const sriTotal = data?.sriStats?.reduce((s, a) => s + a.value, 0) ?? 0;
   const maxSvcAmount = data?.topServices[0]?.amount || 1;
 
   return (
@@ -1104,8 +1076,8 @@ export function FinancialDashboard() {
           </div>
         </div>
 
-        {/* ── Charts Row 1: Tendencia + Asistencia ───────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ── Charts Row: Tendencia + Asistencia + Método de Pago ────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -1134,15 +1106,12 @@ export function FinancialDashboard() {
               <DonutChart stats={data!.attendanceStats} total={attTotal} centerLabel="sesiones" />
             )}
           </div>
-        </div>
 
-        {/* ── Charts Row 2: Método de pago + Facturación electrónica ─────── */}
-        <div className={`grid grid-cols-1 ${data?.sriStats ? 'lg:grid-cols-2' : ''} gap-6`}>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="flex items-center gap-2 mb-4">
               <CreditCard className="w-4 h-4 text-slate-400" />
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Ingresos por Método de Pago</h3>
+                <h3 className="text-sm font-bold text-slate-900">Método de Pago</h3>
                 <p className="text-xs text-slate-400">{appliedLabel}</p>
               </div>
             </div>
@@ -1154,23 +1123,6 @@ export function FinancialDashboard() {
               <DonutChart stats={data!.paymentMethodStats} total={methodTotal} centerLabel="cobrado" formatValue={fmt} />
             )}
           </div>
-
-          {data?.sriStats && (
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <Receipt className="w-4 h-4 text-slate-400" />
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Facturación Electrónica</h3>
-                  <p className="text-xs text-slate-400">{appliedLabel}</p>
-                </div>
-              </div>
-              {sriTotal === 0 ? (
-                <div className="h-32 flex items-center justify-center text-slate-400 text-sm">Sin comprobantes en el período</div>
-              ) : (
-                <DonutChart stats={data.sriStats} total={sriTotal} centerLabel="comprobantes" />
-              )}
-            </div>
-          )}
         </div>
 
         {/* ── Bottom Row: Top Services + Overdue Table ──────────────────── */}
