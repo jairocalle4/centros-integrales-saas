@@ -29,6 +29,7 @@ import { EquipoModule } from './features/organizations/EquipoModule';
 import { ConfiguracionModule } from './features/organizations/ConfiguracionModule';
 import { BeneficiaryDetailPage } from './features/organizations/BeneficiaryDetailPage';
 import { FinancialDashboard } from './features/organizations/FinancialDashboard';
+import { GastosModule } from './features/organizations/GastosModule';
 
 const queryClient = new QueryClient();
 
@@ -77,6 +78,10 @@ createRoot(document.getElementById('root')!).render(
                 <Route
                   path="cobros"
                   element={<CobrosModule />}
+                />
+                <Route
+                  path="gastos"
+                  element={<GastosModule />}
                 />
                 <Route
                   path="facturas"

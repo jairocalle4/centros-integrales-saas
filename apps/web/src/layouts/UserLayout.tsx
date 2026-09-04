@@ -64,6 +64,15 @@ const BASE_NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    to: '/app/gastos',
+    label: 'Gastos',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4m16 0a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4a2 2 0 012-2m16 0a2 2 0 00-2-2H6a2 2 0 00-2 2m8-8v4m-3-2h6" />
+      </svg>
+    ),
+  },
+  {
     to: '/app/equipo',
     label: 'Equipo',
     icon: (

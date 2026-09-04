@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
 import { Link } from 'react-router';
 import toast from 'react-hot-toast';
-import { Calendar, Search, Loader2, CreditCard } from 'lucide-react';
+import { Calendar, Search, Loader2, CreditCard, Wallet, TrendingUp, TrendingDown } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +42,9 @@ type DashboardData = {
   overdueAmount: number; // a hoy
   overdueCount: number; // a hoy
   avgTicket: number;
+  expensesInRange: number;
+  netProfit: number; // revenueInRange - expensesInRange, real desde que existe el módulo de Gastos
+  expensesByCategory: DonutStat[];
   // Operational KPIs
   activeBeneficiaries: number; // a hoy
   activeEnrollments: number; // a hoy
@@ -558,6 +561,7 @@ export function FinancialDashboard() {
         appointmentsAllRes,
         appointmentsRangeRes,
         overdueChargesRes,
+        expensesRangeRes,
       ] = await Promise.all([
         // 1. Pagos del rango — alimenta ingresos, tendencia, método de pago,
         // servicios por ingreso y ticket promedio, todo desde una sola
@@ -660,6 +664,16 @@ export function FinancialDashboard() {
           .lt('due_date', overdueDate)
           .order('due_date', { ascending: true })
           .limit(8),
+
+        // 13. Gastos del rango (excluye anulados) — Gastos del período,
+        // desglose por categoría y Utilidad Neta.
+        (supabase as any)
+          .from('expenses')
+          .select('amount, category')
+          .eq('organization_id', currentOrg.id)
+          .is('voided_at', null)
+          .gte('expense_date', rangeStart)
+          .lte('expense_date', rangeEnd),
       ]);
 
       // ─── Ingresos del rango + comparación vs. período anterior ───────────
@@ -711,6 +725,23 @@ export function FinancialDashboard() {
         rangePayments.map((p: any) => p.charges?.beneficiary_id).filter(Boolean)
       );
       const avgTicket = distinctBeneficiaries.size > 0 ? revenueInRange / distinctBeneficiaries.size : 0;
+
+      // ─── Gastos del rango + Utilidad Neta ─────────────────────────────────
+      // Ahora que existe el módulo de Gastos, esta es una cifra real, no
+      // inventada (antes se descartó explícitamente mostrar "utilidad" sin
+      // datos reales de gasto).
+      const expenseRows = expensesRangeRes.data || [];
+      const expensesInRange = expenseRows.reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+      const netProfit = revenueInRange - expensesInRange;
+
+      const categoryMap: Record<string, number> = {};
+      expenseRows.forEach((e: any) => {
+        categoryMap[e.category] = (categoryMap[e.category] || 0) + Number(e.amount);
+      });
+      const categoryColors = ['#6366f1', '#f43f5e', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#0ea5e9', '#a855f7', '#94a3b8'];
+      const expensesByCategory: DonutStat[] = Object.entries(categoryMap)
+        .map(([category, amount], i) => ({ value: amount, color: categoryColors[i % categoryColors.length], label: category }))
+        .sort((a, b) => b.value - a.value);
 
       // ─── Asistencia del rango ─────────────────────────────────────────────
       const rangeAtt = attendanceRangeRes.data || [];
@@ -786,6 +817,9 @@ export function FinancialDashboard() {
         overdueAmount,
         overdueCount,
         avgTicket,
+        expensesInRange,
+        netProfit,
+        expensesByCategory,
         activeBeneficiaries: beneficiariesRes.count || 0,
         activeEnrollments: (enrollmentsActiveRes as any).count || 0,
         attendanceRateRange,
@@ -820,6 +854,7 @@ export function FinancialDashboard() {
   const revTrendUp = data ? data.revenueInRange >= data.revenuePriorPeriod : true;
   const attTotal = data?.attendanceStats.reduce((s, a) => s + a.value, 0) ?? 0;
   const methodTotal = data?.paymentMethodStats.reduce((s, a) => s + a.value, 0) ?? 0;
+  const categoryTotal = data?.expensesByCategory.reduce((s, a) => s + a.value, 0) ?? 0;
   const maxSvcAmount = data?.topServices[0]?.amount || 1;
 
   return (
@@ -959,6 +994,29 @@ export function FinancialDashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
               }
+            />
+          </div>
+        </div>
+
+        {/* ── Gastos y Utilidad ────────────────────────────────────────── */}
+        <div>
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Gastos y Utilidad — {appliedLabel}</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <KpiCard
+              loading={loading}
+              color="bg-rose-50 text-rose-600"
+              label="Gastos del Período"
+              value={fmt(data?.expensesInRange || 0)}
+              sub="egresos registrados en el período"
+              icon={<Wallet className="w-5 h-5" />}
+            />
+            <KpiCard
+              loading={loading}
+              color={(data?.netProfit || 0) >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}
+              label="Utilidad Neta"
+              value={fmt(data?.netProfit || 0)}
+              sub="ingresos del período − gastos del período"
+              icon={(data?.netProfit || 0) >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
             />
           </div>
         </div>
@@ -1151,8 +1209,8 @@ export function FinancialDashboard() {
           </div>
         </div>
 
-        {/* ── Bottom Row: Top Services + Overdue Table ──────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* ── Bottom Row: Top Services + Gastos por Categoría + Overdue ──── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <div className="mb-4">
               <h3 className="text-sm font-bold text-slate-900">Servicios por Ingreso</h3>
@@ -1170,6 +1228,26 @@ export function FinancialDashboard() {
                   <HorizBar key={svc.name} name={svc.name} amount={svc.amount} max={maxSvcAmount} rank={i + 1} />
                 ))}
               </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Wallet className="w-4 h-4 text-slate-400 shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Gastos por Categoría</h3>
+                <p className="text-xs text-slate-400">{appliedLabel}</p>
+              </div>
+            </div>
+            {loading ? (
+              <div className="h-32 animate-pulse bg-slate-100 rounded-xl" />
+            ) : categoryTotal === 0 ? (
+              <div className="h-32 flex flex-col items-center justify-center gap-2 text-slate-400">
+                <Wallet className="w-8 h-8 text-slate-300" />
+                <span className="text-sm">Sin gastos en el período</span>
+              </div>
+            ) : (
+              <DonutChart stats={data!.expensesByCategory} total={categoryTotal} centerLabel="en gastos" formatValue={fmt} />
             )}
           </div>
 
