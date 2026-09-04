@@ -84,6 +84,14 @@ export function PlatformOrganizationDetail() {
   const [sriConfig, setSriConfig] = useState<SriConfig | null>(null);
   const [sriEnvironment, setSriEnvironment] = useState<'pruebas' | 'produccion'>('pruebas');
   const [savingSriEnv, setSavingSriEnv] = useState(false);
+  // La base ya permite a un superadmin actualizar toda la fila de
+  // sri_configurations (política "Platform admins can update
+  // sri_configurations") — antes solo se aprovechaba para "environment";
+  // establecimiento/punto_emision se mostraban de solo lectura sin
+  // necesidad real, ya que el permiso ya estaba puesto.
+  const [establecimientoDraft, setEstablecimientoDraft] = useState('');
+  const [puntoEmisionDraft, setPuntoEmisionDraft] = useState('');
+  const [savingSriIds, setSavingSriIds] = useState(false);
 
   // Modales
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -236,6 +244,11 @@ export function PlatformOrganizationDetail() {
     if (env) setSriEnvironment(env);
   }, [orgDetailData?.sriConfig?.environment]);
 
+  useLayoutEffect(() => {
+    setEstablecimientoDraft(orgDetailData?.sriConfig?.establecimiento || '');
+    setPuntoEmisionDraft(orgDetailData?.sriConfig?.punto_emision || '');
+  }, [orgDetailData?.sriConfig?.establecimiento, orgDetailData?.sriConfig?.punto_emision]);
+
   const handleAssignPlan = async () => {
     if (!orgId || !selectedPlanId) return;
     setIsAssigningPlan(true);
@@ -288,6 +301,30 @@ export function PlatformOrganizationDetail() {
       toast.error('Error al guardar el ambiente: ' + err.message);
     } finally {
       setSavingSriEnv(false);
+    }
+  };
+
+  const handleSaveSriIds = async () => {
+    if (!orgId) return;
+    const establecimiento = establecimientoDraft.trim();
+    const puntoEmision = puntoEmisionDraft.trim();
+    if (!/^\d{3}$/.test(establecimiento) || !/^\d{3}$/.test(puntoEmision)) {
+      toast.error('Establecimiento y Punto de Emisión deben ser exactamente 3 dígitos (ej. 001).');
+      return;
+    }
+    setSavingSriIds(true);
+    try {
+      const { error } = await supabase
+        .from('sri_configurations')
+        .update({ establecimiento, punto_emision: puntoEmision })
+        .eq('organization_id', orgId);
+      if (error) throw error;
+      toast.success('Establecimiento y Punto de Emisión actualizados.');
+      await invalidateOrgDetail();
+    } catch (err: any) {
+      toast.error('Error al guardar: ' + err.message);
+    } finally {
+      setSavingSriIds(false);
     }
   };
 
@@ -781,16 +818,41 @@ export function PlatformOrganizationDetail() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-3 mb-5 text-sm">
-                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Establecimiento</p>
-                    <p className="font-bold text-slate-900">{sriConfig.establecimiento}</p>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Establecimiento</label>
+                    <input
+                      type="text"
+                      value={establecimientoDraft}
+                      onChange={(e) => setEstablecimientoDraft(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                      placeholder="001"
+                      maxLength={3}
+                      className="w-full font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
                   </div>
-                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Pto. Emisión</p>
-                    <p className="font-bold text-slate-900">{sriConfig.punto_emision}</p>
+                  <div>
+                    <label className="block text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Pto. Emisión</label>
+                    <input
+                      type="text"
+                      value={puntoEmisionDraft}
+                      onChange={(e) => setPuntoEmisionDraft(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                      placeholder="001"
+                      maxLength={3}
+                      className="w-full font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
                   </div>
                 </div>
+                <button
+                  onClick={handleSaveSriIds}
+                  disabled={
+                    savingSriIds ||
+                    (establecimientoDraft === sriConfig.establecimiento && puntoEmisionDraft === sriConfig.punto_emision)
+                  }
+                  className="mb-5 inline-flex items-center justify-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-xs font-semibold shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {savingSriIds && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {savingSriIds ? 'Guardando...' : 'Guardar Establecimiento / Pto. Emisión'}
+                </button>
                 <div className={`mb-5 text-xs font-bold px-3 py-2 rounded-lg border inline-flex items-center gap-1.5 ${
                   sriConfig.cert_uploaded_at ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
                 }`}>
