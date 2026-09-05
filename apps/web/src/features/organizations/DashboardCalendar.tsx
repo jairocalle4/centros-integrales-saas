@@ -13,6 +13,7 @@ import { formatDateWithWeekday } from '../../lib/formatDate';
 import { CitaRapidaModal } from './CitaRapidaModal';
 import { CitasHistorialModal } from './CitasHistorialModal';
 import { Plus, UserPlus, History } from 'lucide-react';
+import { ModalPortal } from '../../components/ui/ModalPortal';
 
 type DayEvent = {
   type: 'attendance' | 'charge' | 'appointment' | 'scheduled_session';
@@ -402,6 +403,7 @@ export function DashboardCalendar() {
 
       {/* Day Details Modal / Popover */}
       {selectedDay && (
+        <ModalPortal>
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 w-full max-w-md space-y-4 animate-popIn">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
@@ -501,14 +503,25 @@ export function DashboardCalendar() {
                               Ya matriculado
                             </span>
                           ) : (
-                            <Link
-                              to={`/app/matricula?appointmentId=${ev.id}&patientName=${encodeURIComponent(ev.patientName || '')}&repName=${encodeURIComponent(ev.representativeName || '')}&phone=${encodeURIComponent(ev.phone || '')}&depositAmount=${ev.amount || 0}`}
-                              onClick={() => setSelectedDay(null)}
-                              className="bg-indigo-600 text-white hover:bg-indigo-700 px-2.5 py-1 rounded font-semibold text-[11px] flex items-center gap-1 transition-colors shadow-xs"
-                            >
-                              <UserPlus className="w-3 h-3" />
-                              Matricular
-                            </Link>
+                            <>
+                              {/* Estado derivado, no persistido — mismo criterio que
+                                  CitasHistorialModal: agendada/confirmada cuya fecha
+                                  ya pasó se muestra como Vencida, sin bloquear que se
+                                  pueda matricular tarde si igual llegó a atenderse. */}
+                              {(ev.status === 'scheduled' || ev.status === 'confirmed') && selectedDay.dateStr < todayStr && (
+                                <span className="bg-orange-50 text-orange-700 border border-orange-200 px-2.5 py-1 rounded font-semibold text-[11px]">
+                                  Vencida
+                                </span>
+                              )}
+                              <Link
+                                to={`/app/matricula?appointmentId=${ev.id}&patientName=${encodeURIComponent(ev.patientName || '')}&repName=${encodeURIComponent(ev.representativeName || '')}&phone=${encodeURIComponent(ev.phone || '')}&depositAmount=${ev.amount || 0}`}
+                                onClick={() => setSelectedDay(null)}
+                                className="bg-indigo-600 text-white hover:bg-indigo-700 px-2.5 py-1 rounded font-semibold text-[11px] flex items-center gap-1 transition-colors shadow-xs"
+                              >
+                                <UserPlus className="w-3 h-3" />
+                                Matricular
+                              </Link>
+                            </>
                           )}
                         </div>
                       </div>
@@ -519,6 +532,7 @@ export function DashboardCalendar() {
             )}
           </div>
         </div>
+        </ModalPortal>
       )}
       {/* Modal Cita Rápida */}
       <CitaRapidaModal

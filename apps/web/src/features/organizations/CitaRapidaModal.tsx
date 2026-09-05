@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useOrg } from './OrgContext';
 import toast from 'react-hot-toast';
 import { X, Calendar } from 'lucide-react';
+import { ModalPortal } from '../../components/ui/ModalPortal';
 
 type Props = {
   isOpen: boolean;
@@ -120,6 +121,7 @@ export function CitaRapidaModal({ isOpen, onClose, defaultDate, onSuccess }: Pro
   };
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden my-8 animate-popIn">
         {/* Header */}
@@ -287,5 +289,6 @@ export function CitaRapidaModal({ isOpen, onClose, defaultDate, onSuccess }: Pro
         </form>
       </div>
     </div>
+    </ModalPortal>
   );
 }

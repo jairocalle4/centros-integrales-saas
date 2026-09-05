@@ -64,7 +64,7 @@ export function BillingGraceAlert({ organizationId }: { organizationId: string }
 
   return (
     <div className="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-96 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      <div className="bg-white rounded-2xl shadow-xl border border-red-200 overflow-hidden">
+      <div className="glow-ring bg-white rounded-2xl shadow-xl border border-red-200 overflow-hidden">
         <div className="flex items-start gap-3 p-4">
           <div className="w-9 h-9 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
             <AlertTriangle className="w-5 h-5" />

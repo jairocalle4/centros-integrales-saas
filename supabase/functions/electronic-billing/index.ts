@@ -134,6 +134,33 @@ async function sriApiFetchText(path: string): Promise<string | null> {
   return await response.text();
 }
 
+// Errores de red/conexión crudos (p.ej. "read ECONNRESET" cuando el
+// servicio externo de facturación corta la conexión a medias) no le dicen
+// nada útil a quien está facturando, y sin contexto pueden sonar a que el
+// pago se cobró o se facturó dos veces. Se reconocen aquí para poder
+// traducirlos a un mensaje claro en vez de dejar pasar el texto crudo del
+// runtime hasta el toast del usuario.
+const NETWORK_ERROR_PATTERN = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network error|fetch failed|connection reset|broken pipe/i;
+
+function isNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return NETWORK_ERROR_PATTERN.test(message);
+}
+
+// Mensaje genérico para cualquier acción de esta Edge Function (retry,
+// resend_email, credit_note, etc.) — no asegura si algo quedó o no
+// facturado, porque eso depende de en qué paso exacto se cortó la
+// conexión. Donde sí se puede asegurar que nada quedó registrado (ver
+// handleEmit y handleEmitCreditNote más abajo) se usa un mensaje más
+// específico y tranquilizador.
+function toUserFacingError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isNetworkError(error)) {
+    return 'No se pudo conectar con el servicio de facturación del SRI. Intenta de nuevo en unos segundos.';
+  }
+  return message;
+}
+
 async function callRideService(payload: unknown) {
   const response = await resilientFetch(`${RIDE_SERVICE_URL}/api/v1/ride/generate`, {
     method: 'POST',
@@ -315,7 +342,7 @@ serve(async (req) => {
     return await handleEmit(supabaseClient, adminClient, body);
 
   } catch (error: any) {
-    return jsonResponse({ error: error.message }, 400);
+    return jsonResponse({ error: toUserFacingError(error) }, 400);
   }
 });
 
@@ -495,10 +522,21 @@ async function handleEmit(
   // ya procesó el request pero antes de que la respuesta llegue,
   // reintentar podría generar dos comprobantes autorizados por el mismo
   // pago. Sí se beneficia del reintento seguro ante 502/503/504.
-  const { ok, data: emitResult } = await sriApiFetch('/sri/emitir/factura', {
-    method: 'POST',
-    body: JSON.stringify(emitPayload),
-  }, { retryOnNetworkError: false });
+  let ok: boolean, emitResult: any;
+  try {
+    ({ ok, data: emitResult } = await sriApiFetch('/sri/emitir/factura', {
+      method: 'POST',
+      body: JSON.stringify(emitPayload),
+    }, { retryOnNetworkError: false }));
+  } catch (error) {
+    // Si esto lanza, todavía no se insertó nada en sri_documents ni se
+    // vinculó ningún internal_payment (eso pasa después, más abajo) — se
+    // puede asegurar con certeza que este intento no facturó nada.
+    if (isNetworkError(error)) {
+      throw new Error('No se pudo conectar con el servicio de facturación del SRI. Tu pago NO fue facturado — puedes intentarlo de nuevo con seguridad.');
+    }
+    throw error;
+  }
 
   if (!ok || !emitResult.success) {
     const errMsg = extractSriApiErrorMessage(emitResult);
@@ -876,10 +914,20 @@ async function handleEmitCreditNote(
 
   // Igual que en la emisión de factura: nunca se reintenta a ciegas ante
   // una excepción de red en esta llamada (muta estado fiscal real).
-  const { ok, data: creditNoteResult } = await sriApiFetch('/sri/emitir/nota-credito', {
-    method: 'POST',
-    body: JSON.stringify(creditNotePayload),
-  }, { retryOnNetworkError: false });
+  let ok: boolean, creditNoteResult: any;
+  try {
+    ({ ok, data: creditNoteResult } = await sriApiFetch('/sri/emitir/nota-credito', {
+      method: 'POST',
+      body: JSON.stringify(creditNotePayload),
+    }, { retryOnNetworkError: false }));
+  } catch (error) {
+    // Misma certeza que en handleEmit: si esto lanza, todavía no se
+    // insertó nada en sri_documents ni se anuló ningún pago.
+    if (isNetworkError(error)) {
+      throw new Error('No se pudo conectar con el servicio de facturación del SRI. La nota de crédito NO fue emitida — puedes intentarlo de nuevo con seguridad.');
+    }
+    throw error;
+  }
 
   if (!ok || !creditNoteResult.success) {
     const errMsg = extractSriApiErrorMessage(creditNoteResult);

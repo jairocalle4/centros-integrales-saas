@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useOrg } from './OrgContext';
 import { formatDate } from '../../lib/formatDate';
 import { X, Search, Calendar, UserPlus } from 'lucide-react';
+import { ModalPortal } from '../../components/ui/ModalPortal';
 
 type Appointment = {
   id: string;
@@ -29,7 +30,21 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   attended:   { label: 'Atendida',   cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   converted:  { label: 'Matriculada',cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   cancelled:  { label: 'Cancelada',  cls: 'bg-red-50 text-red-700 border-red-200' },
+  expired:    { label: 'Vencida',    cls: 'bg-orange-50 text-orange-700 border-orange-200' },
 };
+
+// Estado derivado, no persistido: una cita agendada/confirmada cuya fecha
+// ya pasó sin que nadie la marcara como atendida/matriculada/cancelada se
+// muestra como "Vencida" en vez de quedar como "Agendada" para siempre.
+// No se toca appointments.status en la base de datos — se calcula al
+// vuelo a partir de appointment_date, así que funciona igual para meses
+// pasados y no necesita ningún cron ni cambio de schema.
+function getEffectiveStatus(status: string, appointmentDate: string, todayStr: string): string {
+  if ((status === 'scheduled' || status === 'confirmed') && appointmentDate < todayStr) {
+    return 'expired';
+  }
+  return status;
+}
 
 export function CitasHistorialModal({ isOpen, onClose }: Props) {
   const { currentOrg } = useOrg();
@@ -62,16 +77,19 @@ export function CitasHistorialModal({ isOpen, onClose }: Props) {
 
   if (!isOpen) return null;
 
+  const todayStr = new Date().toISOString().split('T')[0];
+
   const filtered = appointments.filter(a => {
     const q = search.toLowerCase().trim();
     const matchesSearch = !q
       || a.patient_name.toLowerCase().includes(q)
       || a.representative_name.toLowerCase().includes(q);
-    const matchesStatus = statusFilter === 'all' || a.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || getEffectiveStatus(a.status, a.appointment_date, todayStr) === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-3xl my-8 overflow-hidden animate-popIn flex flex-col max-h-[85vh]">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
@@ -106,6 +124,7 @@ export function CitasHistorialModal({ isOpen, onClose }: Props) {
             <option value="attended">Atendidas</option>
             <option value="converted">Matriculadas</option>
             <option value="cancelled">Canceladas</option>
+            <option value="expired">Vencidas</option>
           </select>
         </div>
 
@@ -129,7 +148,8 @@ export function CitasHistorialModal({ isOpen, onClose }: Props) {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map(a => {
-                  const st = STATUS_LABEL[a.status] || { label: a.status, cls: 'bg-slate-50 text-slate-600 border-slate-200' };
+                  const effectiveStatus = getEffectiveStatus(a.status, a.appointment_date, todayStr);
+                  const st = STATUS_LABEL[effectiveStatus] || { label: effectiveStatus, cls: 'bg-slate-50 text-slate-600 border-slate-200' };
                   const canConvert = a.status !== 'converted' && a.status !== 'cancelled';
                   return (
                     <tr key={a.id} className="hover:bg-slate-50">
@@ -178,5 +198,6 @@ export function CitasHistorialModal({ isOpen, onClose }: Props) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
