@@ -31,6 +31,7 @@ import {
   Mic,
   MicOff,
   Loader2,
+  Printer,
 } from 'lucide-react';
 import { ActaCompromisoModal } from './ActaCompromisoModal';
 import type { CommitmentData } from './ActaCompromisoModal';
@@ -42,6 +43,7 @@ import { AttendanceHistoryTable, resolveRecordedByNames } from './AttendanceHist
 import type { AttendanceHistoryRow } from './AttendanceHistory';
 import { InvoiceEnrollmentModal } from './InvoiceEnrollmentModal';
 import { formatDate, formatDateWithWeekday } from '../../lib/formatDate';
+import { downloadSessionNotePdf, downloadProgressReportPdf } from './SessionNoteDocument';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -619,6 +621,10 @@ export function BeneficiaryDetailPage() {
   const [invoicingEnrollmentId, setInvoicingEnrollmentId] = useState<string | null>(null);
 
   const [showNoteForm, setShowNoteForm] = useState(false);
+  const [printingNoteId, setPrintingNoteId] = useState<string | null>(null);
+  const [showProgressReportModal, setShowProgressReportModal] = useState(false);
+  const [progressReportSummary, setProgressReportSummary] = useState('');
+  const [downloadingProgressReport, setDownloadingProgressReport] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<Charge | null>(null);
   const [viewingCharge, setViewingCharge] = useState<Charge | null>(null);
   const [actaData, setActaData] = useState<CommitmentData | null>(null);
@@ -1061,6 +1067,37 @@ export function BeneficiaryDetailPage() {
   const age = calculateAge(beneficiary.birth_date);
   const initials = getInitials(beneficiary.first_name, beneficiary.last_name);
   const hasEnrollment = enrollments.length > 0;
+  const beneficiaryFullName = `${beneficiary.first_name} ${beneficiary.last_name}`;
+
+  const handlePrintNote = async (note: SessionNote) => {
+    if (!currentOrg) return;
+    setPrintingNoteId(note.id);
+    try {
+      await downloadSessionNotePdf({ organization: currentOrg, beneficiaryName: beneficiaryFullName, note });
+    } catch (err: any) {
+      toast.error('Error generando el PDF: ' + err.message);
+    } finally {
+      setPrintingNoteId(null);
+    }
+  };
+
+  const handleDownloadProgressReport = async () => {
+    if (!currentOrg) return;
+    setDownloadingProgressReport(true);
+    try {
+      await downloadProgressReportPdf({
+        organization: currentOrg,
+        beneficiaryName: beneficiaryFullName,
+        notes: sessionNotes,
+        generalSummary: progressReportSummary,
+      });
+      setShowProgressReportModal(false);
+    } catch (err: any) {
+      toast.error('Error generando el PDF: ' + err.message);
+    } finally {
+      setDownloadingProgressReport(false);
+    }
+  };
 
   const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: 'resumen', label: 'Resumen', icon: Baby },
@@ -1437,20 +1474,31 @@ export function BeneficiaryDetailPage() {
           {/* ─── TAB: Progreso de Sesiones ────────────────────────────────── */}
           {activeTab === 'progreso' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-bold text-slate-900 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-indigo-500" />
                   Registros de Avance por Sesión
                 </h3>
-                {hasEnrollment && (
-                  <button
-                    onClick={() => setShowNoteForm(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Nueva Nota de Sesión
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {sessionNotes.length > 0 && (
+                    <button
+                      onClick={() => { setProgressReportSummary(''); setShowProgressReportModal(true); }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition"
+                    >
+                      <Printer className="w-4 h-4" />
+                      Imprimir Avance Completo
+                    </button>
+                  )}
+                  {hasEnrollment && (
+                    <button
+                      onClick={() => setShowNoteForm(true)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Nueva Nota de Sesión
+                    </button>
+                  )}
+                </div>
               </div>
 
               {!hasEnrollment && (
@@ -1501,17 +1549,27 @@ export function BeneficiaryDetailPage() {
                             </div>
                           )}
                         </div>
-                        {note.rating && (
-                          <div className="flex-shrink-0 flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
-                            <span className="text-xl font-extrabold text-indigo-700">{note.rating}</span>
-                            <div className="flex">
-                              {[...Array(5)].map((_, i) => (
-                                <Star key={i} className={`w-3 h-3 ${i < note.rating! ? 'text-amber-400 fill-amber-400' : 'text-slate-300'}`} />
-                              ))}
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => handlePrintNote(note)}
+                            disabled={printingNoteId === note.id}
+                            title="Imprimir esta nota"
+                            className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            {printingNoteId === note.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                          </button>
+                          {note.rating && (
+                            <div className="flex flex-col items-center bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
+                              <span className="text-xl font-extrabold text-indigo-700">{note.rating}</span>
+                              <div className="flex">
+                                {[...Array(5)].map((_, i) => (
+                                  <Star key={i} className={`w-3 h-3 ${i < note.rating! ? 'text-amber-400 fill-amber-400' : 'text-slate-300'}`} />
+                                ))}
+                              </div>
+                              <span className="text-[10px] font-bold text-indigo-500 mt-0.5">Progreso</span>
                             </div>
-                            <span className="text-[10px] font-bold text-indigo-500 mt-0.5">Progreso</span>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1655,6 +1713,45 @@ export function BeneficiaryDetailPage() {
           onClose={() => { setShowNoteForm(false); setNoteFormPrefill({}); }}
           onSuccess={loadAll}
         />
+      )}
+
+      {showProgressReportModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <Printer className="w-5 h-5 text-indigo-500" />
+              Imprimir Avance Completo
+            </h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Se generará un PDF con las {sessionNotes.length} nota(s) de sesión de {beneficiaryFullName}, en orden cronológico.
+            </p>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Resumen General (opcional)</label>
+            <textarea
+              value={progressReportSummary}
+              onChange={(e) => setProgressReportSummary(e.target.value)}
+              rows={3}
+              placeholder="Escribe un resumen del avance general antes de imprimir — aparece destacado al inicio del documento."
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
+            />
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowProgressReportModal(false)}
+                disabled={downloadingProgressReport}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDownloadProgressReport}
+                disabled={downloadingProgressReport}
+                className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {downloadingProgressReport && <Loader2 className="w-4 h-4 animate-spin" />}
+                {downloadingProgressReport ? 'Generando...' : 'Descargar PDF'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {paymentTarget && (
