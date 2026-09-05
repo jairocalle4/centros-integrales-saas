@@ -29,6 +29,7 @@ type SubscriptionPlan = {
   price_annual: number;
   features: {
     has_electronic_billing?: boolean;
+    has_session_notes?: boolean;
     [key: string]: any;
   };
   created_at: string;
@@ -121,6 +122,7 @@ export function PlatformDashboard() {
     price_annual: 0,
     max_members: 10,
     has_electronic_billing: false,
+    has_session_notes: false,
   });
   const [isSubmittingPlan, setIsSubmittingPlan] = useState(false);
 
@@ -445,7 +447,8 @@ export function PlatformDashboard() {
       p_max_members: planForm.max_members,
       p_price_monthly: planForm.price_monthly,
       p_price_annual: planForm.price_annual,
-      p_has_electronic_billing: planForm.has_electronic_billing
+      p_has_electronic_billing: planForm.has_electronic_billing,
+      p_has_session_notes: planForm.has_session_notes
     });
 
     if (error) {
@@ -949,7 +952,7 @@ export function PlatformDashboard() {
                 <button
                   onClick={() => {
                     setEditingPlanId(null);
-                    setPlanForm({ name: '', price_monthly: 0, price_annual: 0, max_members: 10, has_electronic_billing: false });
+                    setPlanForm({ name: '', price_monthly: 0, price_annual: 0, max_members: 10, has_electronic_billing: false, has_session_notes: false });
                     setIsPlanModalOpen(true);
                   }}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors flex items-center gap-2"
@@ -1007,6 +1010,14 @@ export function PlatformDashboard() {
                               Facturación Electrónica
                             </span>
                           </li>
+                          <li className="flex gap-x-3">
+                            <svg className={`h-5 w-5 flex-none ${plan.features?.has_session_notes ? 'text-indigo-600' : 'text-slate-300'}`} viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                            </svg>
+                            <span className={plan.features?.has_session_notes ? 'text-slate-700' : 'text-slate-400 line-through'}>
+                              Notas de Sesión y Progreso
+                            </span>
+                          </li>
                         </ul>
                       </div>
 
@@ -1019,6 +1030,7 @@ export function PlatformDashboard() {
                             price_annual: plan.price_annual,
                             max_members: plan.max_members || 10,
                             has_electronic_billing: plan.features?.has_electronic_billing || false,
+                            has_session_notes: plan.features?.has_session_notes || false,
                           });
                           setIsPlanModalOpen(true);
                         }}
@@ -1817,6 +1829,23 @@ export function PlatformDashboard() {
                   <div>
                     <span className="block text-sm font-medium text-slate-900">Facturación Electrónica (SRI)</span>
                     <span className="block text-xs text-slate-500 mt-1">Activa el módulo integrado de facturación electrónica ecuatoriana para este plan.</span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <div className="flex h-6 items-center">
+                    <input
+                      type="checkbox"
+                      checked={planForm.has_session_notes}
+                      onChange={(e) => setPlanForm({ ...planForm, has_session_notes: e.target.checked })}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600"
+                    />
+                  </div>
+                  <div>
+                    <span className="block text-sm font-medium text-slate-900">Notas de Sesión y Progreso</span>
+                    <span className="block text-xs text-slate-500 mt-1">Registro clínico por sesión (observaciones, logros, próximos pasos, calificación de progreso) — pensado para centros de terapia, no para guarderías.</span>
                   </div>
                 </label>
               </div>

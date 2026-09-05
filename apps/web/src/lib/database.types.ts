@@ -1614,6 +1614,7 @@ export type Database = {
       superadmin_upsert_plan: {
         Args: {
           p_has_electronic_billing: boolean
+          p_has_session_notes?: boolean
           p_max_members: number
           p_name: string
           p_plan_id: string

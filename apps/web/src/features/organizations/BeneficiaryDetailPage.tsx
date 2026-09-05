@@ -593,10 +593,16 @@ export function BeneficiaryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { currentOrg, hasElectronicBilling, hasSriCertificate } = useOrg();
+  const { currentOrg, hasElectronicBilling, hasSessionNotes, hasSriCertificate } = useOrg();
   const canEmitInvoices = hasElectronicBilling && hasSriCertificate;
   const initialTab = (searchParams.get('tab') as Tab) || 'resumen';
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+  // Si llegan directo por URL a ?tab=progreso (ej. un enlace guardado de
+  // antes de que el plan cambiara) sin tener el entitlement, no se queda
+  // en una pestaña huérfana sin botón para volver — cae a Resumen.
+  useEffect(() => {
+    if (activeTab === 'progreso' && !hasSessionNotes) setActiveTab('resumen');
+  }, [activeTab, hasSessionNotes]);
   const [loading, setLoading] = useState(true);
   const [noteFormPrefill, setNoteFormPrefill] = useState<{ date?: string; serviceId?: string }>({});
   const [generatingNextMonthFor, setGeneratingNextMonthFor] = useState<string | null>(null);
@@ -1059,7 +1065,11 @@ export function BeneficiaryDetailPage() {
   const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: 'resumen', label: 'Resumen', icon: Baby },
     { key: 'inscripciones', label: 'Inscripciones', icon: GraduationCap, count: enrollments.length },
-    { key: 'progreso', label: 'Progreso de Sesiones', icon: BookOpen, count: sessionNotes.length },
+    // Notas de Sesión es un feature de plan (has_session_notes) — pensado
+    // para centros de terapia, no para guarderías. Oculta la pestaña
+    // completa cuando el plan no lo incluye, mismo patrón que
+    // buildNavItems(hasElectronicBilling) ya usa para ocultar "Facturas".
+    ...(hasSessionNotes ? [{ key: 'progreso' as Tab, label: 'Progreso de Sesiones', icon: BookOpen, count: sessionNotes.length }] : []),
     { key: 'asistencia', label: 'Asistencia', icon: CalendarCheck, count: attendanceHistory.length },
     { key: 'cobros', label: 'Cobros', icon: DollarSign, count: charges.filter(c => c.status !== 'paid').length },
   ];

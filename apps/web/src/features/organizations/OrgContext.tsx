@@ -21,6 +21,7 @@ interface OrgContextType {
   isActive: boolean | null;
   currentRole: string | null;
   hasElectronicBilling: boolean;
+  hasSessionNotes: boolean;
   hasSriCertificate: boolean;
   refreshOrgs: () => Promise<void>;
 }
@@ -43,6 +44,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [isActive, setIsActive] = useState<boolean | null>(null);
   const [currentRole, setCurrentRole] = useState<string | null>(null);
   const [hasElectronicBilling, setHasElectronicBilling] = useState(false);
+  const [hasSessionNotes, setHasSessionNotes] = useState(false);
   const [hasSriCertificate, setHasSriCertificate] = useState(false);
 
   const fetchOrgs = async () => {
@@ -100,23 +102,28 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, [currentOrg]);
 
   useEffect(() => {
-    async function loadElectronicBillingEntitlement() {
-      if (!currentOrg) { setHasElectronicBilling(false); return; }
+    // Un solo fetch de features alimenta ambos entitlements — evita
+    // repetir el mismo par de consultas (subscriptions + subscription_plans)
+    // por cada flag que se agregue a futuro.
+    async function loadPlanEntitlements() {
+      if (!currentOrg) { setHasElectronicBilling(false); setHasSessionNotes(false); return; }
       const { data: subscription } = await supabase
         .from('subscriptions')
         .select('plan_id')
         .eq('organization_id', currentOrg.id)
         .maybeSingle();
-      if (!subscription?.plan_id) { setHasElectronicBilling(false); return; }
+      if (!subscription?.plan_id) { setHasElectronicBilling(false); setHasSessionNotes(false); return; }
 
       const { data: plan } = await supabase
         .from('subscription_plans')
         .select('features')
         .eq('id', subscription.plan_id)
         .maybeSingle();
-      setHasElectronicBilling(Boolean((plan?.features as any)?.has_electronic_billing));
+      const features = plan?.features as any;
+      setHasElectronicBilling(Boolean(features?.has_electronic_billing));
+      setHasSessionNotes(Boolean(features?.has_session_notes));
     }
-    loadElectronicBillingEntitlement();
+    loadPlanEntitlements();
   }, [currentOrg]);
 
   useEffect(() => {
@@ -167,6 +174,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       isActive,
       currentRole,
       hasElectronicBilling,
+      hasSessionNotes,
       hasSriCertificate,
       refreshOrgs: fetchOrgs
     }}>
