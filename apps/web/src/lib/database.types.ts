@@ -1617,7 +1617,7 @@ export type Database = {
           p_has_session_notes?: boolean
           p_max_members: number
           p_name: string
-          p_plan_id: string
+          p_plan_id?: string
           p_price_annual: number
           p_price_monthly: number
         }

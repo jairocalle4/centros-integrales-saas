@@ -442,7 +442,7 @@ export function PlatformDashboard() {
 
     setIsSubmittingPlan(true);
     const { error } = await supabase.rpc('superadmin_upsert_plan', {
-      p_plan_id: editingPlanId || '',
+      p_plan_id: editingPlanId ?? undefined,
       p_name: planForm.name.trim(),
       p_max_members: planForm.max_members,
       p_price_monthly: planForm.price_monthly,
