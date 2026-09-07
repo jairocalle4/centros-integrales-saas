@@ -23,6 +23,9 @@ interface OrgContextType {
   hasElectronicBilling: boolean;
   hasSessionNotes: boolean;
   hasSriCertificate: boolean;
+  // 0 = ilimitado (mismo criterio ya usado en create_invitation y en el
+  // formulario de planes de superadmin: "Max Miembros (0 = Ilimitado)").
+  maxMembers: number;
   refreshOrgs: () => Promise<void>;
 }
 
@@ -46,6 +49,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [hasElectronicBilling, setHasElectronicBilling] = useState(false);
   const [hasSessionNotes, setHasSessionNotes] = useState(false);
   const [hasSriCertificate, setHasSriCertificate] = useState(false);
+  const [maxMembers, setMaxMembers] = useState(0);
 
   const fetchOrgs = async () => {
     if (!session) return;
@@ -106,22 +110,23 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // repetir el mismo par de consultas (subscriptions + subscription_plans)
     // por cada flag que se agregue a futuro.
     async function loadPlanEntitlements() {
-      if (!currentOrg) { setHasElectronicBilling(false); setHasSessionNotes(false); return; }
+      if (!currentOrg) { setHasElectronicBilling(false); setHasSessionNotes(false); setMaxMembers(0); return; }
       const { data: subscription } = await supabase
         .from('subscriptions')
         .select('plan_id')
         .eq('organization_id', currentOrg.id)
         .maybeSingle();
-      if (!subscription?.plan_id) { setHasElectronicBilling(false); setHasSessionNotes(false); return; }
+      if (!subscription?.plan_id) { setHasElectronicBilling(false); setHasSessionNotes(false); setMaxMembers(0); return; }
 
       const { data: plan } = await supabase
         .from('subscription_plans')
-        .select('features')
+        .select('features, max_members')
         .eq('id', subscription.plan_id)
         .maybeSingle();
       const features = plan?.features as any;
       setHasElectronicBilling(Boolean(features?.has_electronic_billing));
       setHasSessionNotes(Boolean(features?.has_session_notes));
+      setMaxMembers(Number(plan?.max_members) || 0);
     }
     loadPlanEntitlements();
   }, [currentOrg]);
@@ -176,6 +181,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       hasElectronicBilling,
       hasSessionNotes,
       hasSriCertificate,
+      maxMembers,
       refreshOrgs: fetchOrgs
     }}>
       {children}

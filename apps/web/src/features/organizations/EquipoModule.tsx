@@ -45,7 +45,7 @@ const inviteSchema = z.object({
 type InviteForm = z.infer<typeof inviteSchema>;
 
 export function EquipoModule() {
-  const { currentOrg, currentRole } = useOrg();
+  const { currentOrg, currentRole, maxMembers } = useOrg();
   const { session } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
@@ -178,23 +178,37 @@ export function EquipoModule() {
     loadMembers(currentOrg.id);
   };
 
-  const onRemoveMember = async (member: Member) => {
+  // Desactivar, nunca borrar — mismo criterio de dominio ya aplicado a
+  // beneficiarios/is_active: se pierde el acceso al instante (todas las
+  // políticas de RLS ya exigen status = 'active'), pero el historial de
+  // quién hizo qué mientras fue miembro no desaparece. Reactivar hace lo
+  // mismo al revés.
+  const onToggleMemberActive = async (member: Member) => {
     if (!currentOrg) return;
+    const activating = member.status !== 'active';
     setRemovingId(member.id);
     const { error } = await supabase
       .from('organization_members')
-      .delete()
+      .update({ status: activating ? 'active' : 'inactive' })
       .eq('id', member.id);
     setRemovingId(null);
     setConfirmRemoveId(null);
 
     if (error) {
-      toast.error('No se pudo quitar al integrante: ' + error.message);
+      toast.error(`No se pudo ${activating ? 'reactivar' : 'desactivar'} al integrante: ` + error.message);
       return;
     }
-    toast.success('Integrante removido del centro.');
+    toast.success(activating ? 'Integrante reactivado.' : 'Integrante desactivado — ya no tiene acceso al centro.');
     loadMembers(currentOrg.id);
   };
+
+  // Mismo conteo que create_invitation en la base: activos + invitaciones
+  // pendientes cuentan contra el cupo del plan — así el número que se ve
+  // aquí siempre coincide con lo que el servidor realmente va a permitir.
+  const activeMembersCount = members.filter((m) => m.status === 'active').length;
+  const pendingInvitationsCount = invitations.filter((i) => i.status === 'pending').length;
+  const usedSeats = activeMembersCount + pendingInvitationsCount;
+  const seatsLimitReached = maxMembers > 0 && usedSeats >= maxMembers;
 
   if (!currentOrg) return null;
 
@@ -242,15 +256,26 @@ export function EquipoModule() {
       {/* Members Section */}
       {activeSubTab === 'members' && (
       <div className="bg-white shadow-sm border border-slate-200 rounded-2xl overflow-hidden">
-        <div className="border-b border-slate-200 px-6 py-5 flex justify-between items-center bg-slate-50/50">
-          <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-            <Users className="w-5 h-5 text-indigo-600" />
-            Integrantes del Centro
-          </h3>
+        <div className="border-b border-slate-200 px-6 py-5 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50">
+          <div>
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+              <Users className="w-5 h-5 text-indigo-600" />
+              Integrantes del Centro
+            </h3>
+            <p className={`text-xs mt-1 ${seatsLimitReached ? 'text-amber-700 font-semibold' : 'text-slate-500'}`}>
+              {maxMembers > 0
+                ? seatsLimitReached
+                  ? `Usaste los ${maxMembers} usuarios de tu plan — sube de plan para invitar más.`
+                  : `${usedSeats} de ${maxMembers} usuarios de tu plan — puedes invitar ${maxMembers - usedSeats} más.`
+                : `${usedSeats} usuario${usedSeats === 1 ? '' : 's'} — tu plan no tiene límite.`}
+            </p>
+          </div>
           {canManageMembers && (
             <button
               onClick={() => setIsInviting(!isInviting)}
-              className="inline-flex items-center gap-2 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors shadow-sm"
+              disabled={!isInviting && seatsLimitReached}
+              title={!isInviting && seatsLimitReached ? 'Llegaste al límite de usuarios de tu plan' : undefined}
+              className="inline-flex items-center gap-2 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
             >
               <UserPlus className="w-4 h-4" />
               {isInviting ? 'Cancelar' : 'Invitar miembro'}
@@ -311,11 +336,15 @@ export function EquipoModule() {
               {members.map((member) => {
                 const isSelf = member.user_id === myUserId;
                 const isOwner = member.role === 'owner';
+                const isActiveMember = member.status === 'active';
                 // Only an owner may touch another owner's row; nobody edits their own row here.
                 const canEditThisMember = canManageMembers && !isSelf && (!isOwner || currentRole === 'owner');
+                // No tiene sentido reactivar si ya no cabe en el plan — mismo
+                // conteo que el aviso de arriba y que create_invitation.
+                const reactivateBlocked = !isActiveMember && seatsLimitReached;
 
                 return (
-                  <li key={member.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-x-6 py-4">
+                  <li key={member.id} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-x-6 py-4 ${!isActiveMember ? 'opacity-60' : ''}`}>
                     <div className="min-w-0">
                       <div className="flex items-center gap-x-3 flex-wrap">
                         <p className="text-sm font-semibold text-slate-900 truncate">
@@ -336,9 +365,13 @@ export function EquipoModule() {
                       </div>
                     </div>
                     <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
-                      <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
+                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full border flex items-center gap-1 ${
+                        isActiveMember
+                          ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                          : 'text-slate-500 bg-slate-100 border-slate-200'
+                      }`}>
                         <CheckCircle className="w-3.5 h-3.5" />
-                        {member.status}
+                        {isActiveMember ? 'Activo' : 'Inactivo'}
                       </span>
 
                       {canEditThisMember && (
@@ -354,14 +387,23 @@ export function EquipoModule() {
                             ))}
                           </select>
 
-                          {confirmRemoveId === member.id ? (
+                          {!isActiveMember ? (
+                            <button
+                              onClick={() => onToggleMemberActive(member)}
+                              disabled={removingId === member.id || reactivateBlocked}
+                              title={reactivateBlocked ? 'Llegaste al límite de usuarios de tu plan' : undefined}
+                              className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                            >
+                              {removingId === member.id ? 'Reactivando...' : 'Reactivar'}
+                            </button>
+                          ) : confirmRemoveId === member.id ? (
                             <div className="flex items-center gap-1.5">
                               <button
-                                onClick={() => onRemoveMember(member)}
+                                onClick={() => onToggleMemberActive(member)}
                                 disabled={removingId === member.id}
-                                className="text-xs font-semibold text-white bg-red-600 hover:bg-red-700 px-2.5 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer"
+                                className="text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer"
                               >
-                                {removingId === member.id ? 'Quitando...' : 'Confirmar'}
+                                {removingId === member.id ? 'Desactivando...' : 'Confirmar'}
                               </button>
                               <button
                                 onClick={() => setConfirmRemoveId(null)}
@@ -373,9 +415,10 @@ export function EquipoModule() {
                           ) : (
                             <button
                               onClick={() => setConfirmRemoveId(member.id)}
-                              className="text-xs font-semibold text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Le quita el acceso al centro sin borrar su historial — se puede reactivar después"
+                              className="text-xs font-semibold text-amber-700 hover:text-amber-800 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
                             >
-                              Quitar
+                              Desactivar
                             </button>
                           )}
                         </>
