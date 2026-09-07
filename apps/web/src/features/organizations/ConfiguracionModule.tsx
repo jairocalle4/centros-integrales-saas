@@ -21,6 +21,7 @@ export function ConfiguracionModule() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [isEditingPassword, setIsEditingPassword] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -162,11 +163,19 @@ export function ConfiguracionModule() {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
+      setIsEditingPassword(false);
     } catch (err: any) {
       toast.error('Error al cambiar la contraseña: ' + err.message);
     } finally {
       setChangingPassword(false);
     }
+  };
+
+  const cancelChangePassword = () => {
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setIsEditingPassword(false);
   };
 
   if (!currentOrg) return null;
@@ -361,8 +370,9 @@ export function ConfiguracionModule() {
 
       {/* TAB 3: Cambiar Contraseña */}
       {activeTab === 'cuenta' && (
-        <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-10">
-          <div className="max-w-lg">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* Tarjeta: Mis Datos */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-7 shadow-xs">
             <div className="flex items-center justify-between gap-4 mb-6">
               <div className="flex items-center gap-4 min-w-0">
                 <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-700 text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0">
@@ -449,59 +459,97 @@ export function ConfiguracionModule() {
             )}
           </div>
 
-          <form onSubmit={handleChangePassword} className="space-y-5 max-w-md pt-8 border-t border-slate-100">
-            <h3 className="text-sm font-bold text-slate-900">Cambiar Contraseña</h3>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña actual</label>
-              <input
-                type="password"
-                required
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Nueva contraseña</label>
-              <input
-                type="password"
-                required
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
-              />
-              <ul className="mt-2 space-y-0.5">
-                {PASSWORD_RULES.map((rule) => (
-                  <li key={rule.label} className={`text-xs flex items-center gap-1.5 ${rule.test(newPassword) ? 'text-emerald-600' : 'text-slate-400'}`}>
-                    <span>{rule.test(newPassword) ? '✓' : '·'}</span>
-                    {rule.label}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Confirmar nueva contraseña</label>
-              <input
-                type="password"
-                required
-                value={confirmNewPassword}
-                onChange={(e) => setConfirmNewPassword(e.target.value)}
-                className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
-              />
+          {/* Tarjeta: Contraseña */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-7 shadow-xs">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div className="flex items-center gap-4 min-w-0">
+                <div className="w-14 h-14 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shadow-sm shrink-0">
+                  <KeyRound className="w-6 h-6" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900">Contraseña</h3>
+                  <p className="text-xs text-slate-500 truncate">Protege el acceso a tu cuenta</p>
+                </div>
+              </div>
+              {!isEditingPassword && (
+                <button
+                  onClick={() => setIsEditingPassword(true)}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-3.5 py-2 rounded-lg transition-colors cursor-pointer shrink-0"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Cambiar
+                </button>
+              )}
             </div>
 
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={changingPassword}
-                className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-xs disabled:opacity-50 transition-colors"
-              >
-                {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                {changingPassword ? 'Guardando...' : 'Cambiar Contraseña'}
-              </button>
-            </div>
-          </form>
+            {isEditingPassword ? (
+              <form onSubmit={handleChangePassword} className="space-y-5 bg-slate-50 border border-slate-200 rounded-2xl p-5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Contraseña actual</label>
+                  <input
+                    type="password"
+                    required
+                    autoFocus
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Nueva contraseña</label>
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <ul className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                    {PASSWORD_RULES.map((rule) => (
+                      <li key={rule.label} className={`text-xs flex items-center gap-1.5 ${rule.test(newPassword) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                        <span>{rule.test(newPassword) ? '✓' : '·'}</span>
+                        {rule.label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Confirmar nueva contraseña</label>
+                  <input
+                    type="password"
+                    required
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    type="submit"
+                    disabled={changingPassword}
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-xs disabled:opacity-50 transition-colors"
+                  >
+                    {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {changingPassword ? 'Guardando...' : 'Guardar'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelChangePassword}
+                    disabled={changingPassword}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900 px-3.5 py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 flex items-center justify-between gap-4">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Contraseña</span>
+                <span className="text-sm font-semibold text-slate-900 tracking-widest">••••••••</span>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
