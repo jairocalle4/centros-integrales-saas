@@ -4,7 +4,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import { ElectronicBillingSettings } from '../billing/ElectronicBillingSettings';
-import { Building2, Save, MapPin, Phone, Mail, FileText, ShieldCheck, Loader2, KeyRound } from 'lucide-react';
+import { Building2, Save, MapPin, Phone, Mail, FileText, ShieldCheck, Loader2, KeyRound, Pencil, X, User as UserIcon } from 'lucide-react';
 
 const PASSWORD_RULES = [
   { test: (v: string) => v.length >= 8, label: 'Al menos 8 caracteres' },
@@ -25,6 +25,9 @@ export function ConfiguracionModule() {
   const [lastName, setLastName] = useState('');
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [firstNameDraft, setFirstNameDraft] = useState('');
+  const [lastNameDraft, setLastNameDraft] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -43,10 +46,16 @@ export function ConfiguracionModule() {
       });
   }, [user]);
 
+  const startEditingProfile = () => {
+    setFirstNameDraft(firstName);
+    setLastNameDraft(lastName);
+    setIsEditingProfile(true);
+  };
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    if (!firstName.trim() || !lastName.trim()) {
+    if (!firstNameDraft.trim() || !lastNameDraft.trim()) {
       toast.error('El nombre y el apellido no pueden estar vacíos.');
       return;
     }
@@ -54,9 +63,12 @@ export function ConfiguracionModule() {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ first_name: firstName.trim(), last_name: lastName.trim(), updated_at: new Date().toISOString() })
+        .update({ first_name: firstNameDraft.trim(), last_name: lastNameDraft.trim(), updated_at: new Date().toISOString() })
         .eq('id', user.id);
       if (error) throw error;
+      setFirstName(firstNameDraft.trim());
+      setLastName(lastNameDraft.trim());
+      setIsEditingProfile(false);
       toast.success('Datos actualizados.');
     } catch (err: any) {
       toast.error('Error al guardar: ' + err.message);
@@ -350,48 +362,92 @@ export function ConfiguracionModule() {
       {/* TAB 3: Cambiar Contraseña */}
       {activeTab === 'cuenta' && (
         <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-10">
-          <form onSubmit={handleSaveProfile} className="space-y-5 max-w-md">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">Mis Datos</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Sesión: {user?.email}</p>
+          <div className="max-w-lg">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div className="flex items-center gap-4 min-w-0">
+                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-700 text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0">
+                  {firstName || lastName
+                    ? `${firstName[0] || ''}${lastName[0] || ''}`.toUpperCase()
+                    : <UserIcon className="w-6 h-6" />}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900 truncate">
+                    {firstName || lastName ? `${firstName} ${lastName}` : 'Mis Datos'}
+                  </h3>
+                  <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                </div>
+              </div>
+              {!isEditingProfile && !loadingProfile && (
+                <button
+                  onClick={startEditingProfile}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-3.5 py-2 rounded-lg transition-colors cursor-pointer shrink-0"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Editar
+                </button>
+              )}
             </div>
+
             {loadingProfile ? (
               <p className="text-sm text-slate-400">Cargando...</p>
-            ) : (
-              <>
+            ) : isEditingProfile ? (
+              <form onSubmit={handleSaveProfile} className="space-y-5 bg-slate-50 border border-slate-200 rounded-2xl p-5">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Nombre</label>
                     <input
                       type="text"
                       required
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
+                      autoFocus
+                      value={firstNameDraft}
+                      onChange={(e) => setFirstNameDraft(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Apellido</label>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Apellido</label>
                     <input
                       type="text"
                       required
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
+                      value={lastNameDraft}
+                      onChange={(e) => setLastNameDraft(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
                   </div>
                 </div>
-                <button
-                  type="submit"
-                  disabled={savingProfile}
-                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-xs disabled:opacity-50 transition-colors"
-                >
-                  {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  {savingProfile ? 'Guardando...' : 'Guardar Datos'}
-                </button>
-              </>
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    type="submit"
+                    disabled={savingProfile}
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-xs disabled:opacity-50 transition-colors"
+                  >
+                    {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {savingProfile ? 'Guardando...' : 'Guardar'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingProfile(false)}
+                    disabled={savingProfile}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900 px-3.5 py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl divide-y divide-slate-200">
+                <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nombre completo</span>
+                  <span className="text-sm font-semibold text-slate-900 truncate">{firstName} {lastName}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Correo electrónico</span>
+                  <span className="text-sm font-semibold text-slate-900 truncate">{user?.email}</span>
+                </div>
+              </div>
             )}
-          </form>
+          </div>
 
           <form onSubmit={handleChangePassword} className="space-y-5 max-w-md pt-8 border-t border-slate-100">
             <h3 className="text-sm font-bold text-slate-900">Cambiar Contraseña</h3>
