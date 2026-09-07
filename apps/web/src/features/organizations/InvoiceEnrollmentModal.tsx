@@ -3,7 +3,9 @@ import { X, Receipt, FileCheck, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
-import { useComprobanteComprador, extractEdgeFunctionError, showEmailStatusToast } from './PaymentDetailModal';
+import { useComprobanteComprador, extractEdgeFunctionError, showEmailStatusToast, fetchJustEmittedInvoice } from './PaymentDetailModal';
+import { InvoiceDetailModal } from './InvoiceDetailModal';
+import type { InvoiceDetailDocument } from './InvoiceDetailModal';
 
 type PendingPayment = {
   id: string;
@@ -37,6 +39,7 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
+  const [justEmittedInvoice, setJustEmittedInvoice] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
   const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
 
   useEffect(() => {
@@ -99,16 +102,38 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
       if (error || (data as any)?.error) {
         throw new Error(await extractEdgeFunctionError(data, error));
       }
-      toast.success(`Factura electrónica por $${total.toFixed(2)} autorizada por el SRI.`, { duration: 4000 });
       showEmailStatusToast((data as any)?.email_status);
       onSuccess();
-      onClose();
+      // Muestra la factura recién emitida al instante, en vez de que el
+      // usuario tenga que ir a buscarla al módulo Facturas.
+      const detail = await fetchJustEmittedInvoice((data as any).sri_document_id);
+      if (detail) {
+        setJustEmittedInvoice(detail);
+      } else {
+        toast.success(`Factura electrónica por $${total.toFixed(2)} autorizada por el SRI.`, { duration: 4000 });
+        onClose();
+      }
     } catch (err: any) {
       toast.error('Error al facturar: ' + err.message);
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (justEmittedInvoice) {
+    return (
+      <InvoiceDetailModal
+        isOpen
+        onClose={onClose}
+        organizationId={organizationId}
+        invoice={justEmittedInvoice.invoice}
+        concept={justEmittedInvoice.concept}
+        hasAuthorizedCreditNote={false}
+        modifiedDocument={null}
+        onChanged={onSuccess}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">

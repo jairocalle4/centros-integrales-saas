@@ -8,6 +8,8 @@ import { toWhatsAppNumber } from '../../lib/phone';
 import { downloadReceiptPdf, uploadReceiptAndGetSignedUrl } from './ReceiptDocument';
 import type { ReceiptOrganization } from './ReceiptDocument';
 import { CreditNoteModal } from './CreditNoteModal';
+import { InvoiceDetailModal } from './InvoiceDetailModal';
+import type { InvoiceDetailDocument } from './InvoiceDetailModal';
 
 export type Payment = {
   id: string;
@@ -176,6 +178,33 @@ export function showEmailStatusToast(emailStatus?: string) {
   if (info.tone === 'error') toast.error(info.message, { duration: 6000 });
   else if (info.tone === 'success') toast.success(info.message, { duration: 4000 });
   else toast(info.message, { duration: 5000, icon: 'ℹ️' });
+}
+
+// Trae el comprobante recién emitido, con lo necesario para abrir
+// InvoiceDetailModal al instante después de facturar — en vez de que el
+// usuario tenga que ir a buscarlo al módulo Facturas. Mismo select y
+// misma derivación de "concepto" que FacturasModule.tsx (duplicados a
+// propósito, no importados de ahí: evita un import circular entre este
+// archivo e InvoiceDetailModal/FacturasModule, que a su vez importan de
+// este archivo).
+export async function fetchJustEmittedInvoice(
+  sriDocumentId: string
+): Promise<{ invoice: InvoiceDetailDocument; concept: string } | null> {
+  const { data, error } = await (supabase as any)
+    .from('sri_documents')
+    .select(
+      'id, status, clave_acceso, total, cliente_identificacion, cliente_razon_social, cliente_email, authorization_number, authorization_date, pdf_url, created_at, document_type, documento_modificado_id, motivo, internal_payments ( charges ( description ) )'
+    )
+    .eq('id', sriDocumentId)
+    .maybeSingle();
+  if (error || !data) return null;
+
+  const descriptions = ((data.internal_payments || []) as any[])
+    .map((p) => p.charges?.description)
+    .filter((d): d is string => Boolean(d));
+  const concept = descriptions.length > 0 ? [...new Set(descriptions)].join(', ') : 'Servicio';
+
+  return { invoice: data as InvoiceDetailDocument, concept };
 }
 
 export async function retryInvoice(organizationId: string, sriDocumentId: string): Promise<boolean> {
@@ -529,7 +558,7 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                   const blockedByInvoiceWithoutCreditNote = Boolean(hasAuthorizedInvoice) && !hasAuthorizedCreditNote;
 
                   return (
-                    <div key={payment.id} className={`flex flex-wrap items-center justify-between gap-3 gap-y-2 p-3 rounded-xl bg-white border shadow-sm transition-colors ${isVoided ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'}`}>
+                    <div key={payment.id} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-xl bg-white border shadow-sm transition-colors ${isVoided ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'}`}>
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                           <DollarSign className="w-4 h-4" />
@@ -562,12 +591,12 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
+                      <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap">
                         <span className={`font-semibold text-slate-900 ${isVoided ? 'line-through text-slate-400' : ''}`}>
                           ${Number(payment.amount).toFixed(2)}
                         </span>
 
-                        <div className="flex items-center gap-1 border-l border-slate-100 pl-3">
+                        <div className="flex items-center gap-1 flex-wrap sm:border-l sm:border-slate-100 sm:pl-3">
                           {payment.sri_document_id && payment.sri_documents?.status === 'AUTHORIZED' && (
                             <button
                               onClick={() => payment.sri_documents!.pdf_url && openInvoicePdf(payment.sri_documents!.pdf_url)}
@@ -744,6 +773,7 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
   const [reference, setReference] = useState('');
   const [submittingAction, setSubmittingAction] = useState<'save' | 'invoice' | null>(null);
   const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
+  const [justEmittedInvoice, setJustEmittedInvoice] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
   const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
 
   const validate = (): boolean => {
@@ -833,18 +863,43 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
           // vinculado — el pago se conserva para poder reintentar.
           toast.error('El pago se guardó, pero el SRI rechazó la factura: ' + message, { duration: 7000 });
         }
+        onSuccess();
+        onClose();
       } else {
-        toast.success('Pago guardado y factura electrónica autorizada por el SRI.', { duration: 4000 });
         showEmailStatusToast((data as any)?.email_status);
+        onSuccess();
+        // Muestra la factura recién emitida al instante, en vez de que el
+        // usuario tenga que ir a buscarla al módulo Facturas — si por lo
+        // que sea no se puede traer el detalle, el toast es el respaldo.
+        const detail = await fetchJustEmittedInvoice((data as any).sri_document_id);
+        if (detail) {
+          setJustEmittedInvoice(detail);
+        } else {
+          toast.success('Pago guardado y factura electrónica autorizada por el SRI.', { duration: 4000 });
+          onClose();
+        }
       }
-      onSuccess();
-      onClose();
     } finally {
       setSubmittingAction(null);
     }
   };
 
   const invoiceBlocked = Boolean(hasElectronicBilling) && !repLoading && !hasIdentification && !allowConsumidorFinal;
+
+  if (justEmittedInvoice) {
+    return (
+      <InvoiceDetailModal
+        isOpen
+        onClose={onClose}
+        organizationId={charge.organization_id}
+        invoice={justEmittedInvoice.invoice}
+        concept={justEmittedInvoice.concept}
+        hasAuthorizedCreditNote={false}
+        modifiedDocument={null}
+        onChanged={onSuccess}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
