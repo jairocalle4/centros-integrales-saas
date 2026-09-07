@@ -1,13 +1,26 @@
 import { useState, useEffect } from 'react';
 import { useOrg } from './OrgContext';
+import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import { ElectronicBillingSettings } from '../billing/ElectronicBillingSettings';
-import { Building2, Save, MapPin, Phone, Mail, FileText, ShieldCheck, Loader2 } from 'lucide-react';
+import { Building2, Save, MapPin, Phone, Mail, FileText, ShieldCheck, Loader2, KeyRound } from 'lucide-react';
+
+const PASSWORD_RULES = [
+  { test: (v: string) => v.length >= 8, label: 'Al menos 8 caracteres' },
+  { test: (v: string) => /[A-Z]/.test(v), label: 'Una letra mayúscula' },
+  { test: (v: string) => /[a-z]/.test(v), label: 'Una letra minúscula' },
+  { test: (v: string) => /[^A-Za-z0-9]/.test(v), label: 'Un símbolo o carácter especial' },
+];
 
 export function ConfiguracionModule() {
   const { currentOrg, refreshOrgs, hasElectronicBilling } = useOrg();
-  const [activeTab, setActiveTab] = useState<'general' | 'sri'>('general');
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<'general' | 'sri' | 'cuenta'>('general');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const [name, setName] = useState('');
   const [ruc, setRuc] = useState('');
@@ -59,6 +72,48 @@ export function ConfiguracionModule() {
     }
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.email) return;
+
+    const failedRule = PASSWORD_RULES.find((r) => !r.test(newPassword));
+    if (failedRule) {
+      toast.error('La nueva contraseña necesita: ' + failedRule.label.toLowerCase());
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('Las contraseñas nuevas no coinciden.');
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      // Verifica la contraseña actual antes de cambiarla — sin esto,
+      // cualquiera que encuentre una sesión abierta y sin cerrar podría
+      // cambiarle la contraseña a otra persona sin saber la actual.
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+      if (verifyError) {
+        toast.error('La contraseña actual no es correcta.');
+        return;
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) throw updateError;
+
+      toast.success('Contraseña actualizada exitosamente.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err: any) {
+      toast.error('Error al cambiar la contraseña: ' + err.message);
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   if (!currentOrg) return null;
 
   return (
@@ -99,6 +154,17 @@ export function ConfiguracionModule() {
         >
           <ShieldCheck className="w-4 h-4" />
           Facturación Electrónica SRI
+        </button>
+        <button
+          onClick={() => setActiveTab('cuenta')}
+          className={`py-3.5 px-6 font-semibold text-sm border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+            activeTab === 'cuenta'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <KeyRound className="w-4 h-4" />
+          Mi Cuenta
         </button>
       </div>
 
@@ -235,6 +301,66 @@ export function ConfiguracionModule() {
       {activeTab === 'sri' && (
         <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs">
           <ElectronicBillingSettings orgId={currentOrg.id} hasElectronicBilling={hasElectronicBilling} />
+        </div>
+      )}
+
+      {/* TAB 3: Cambiar Contraseña */}
+      {activeTab === 'cuenta' && (
+        <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs">
+          <form onSubmit={handleChangePassword} className="space-y-5 max-w-md">
+            <h3 className="text-sm font-bold text-slate-900">Cambiar Contraseña</h3>
+            <p className="text-xs text-slate-500 -mt-3">Sesión: {user?.email}</p>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña actual</label>
+              <input
+                type="password"
+                required
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Nueva contraseña</label>
+              <input
+                type="password"
+                required
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
+              />
+              <ul className="mt-2 space-y-0.5">
+                {PASSWORD_RULES.map((rule) => (
+                  <li key={rule.label} className={`text-xs flex items-center gap-1.5 ${rule.test(newPassword) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    <span>{rule.test(newPassword) ? '✓' : '·'}</span>
+                    {rule.label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Confirmar nueva contraseña</label>
+              <input
+                type="password"
+                required
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
+              />
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={changingPassword}
+                className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-xs disabled:opacity-50 transition-colors"
+              >
+                {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                {changingPassword ? 'Guardando...' : 'Cambiar Contraseña'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

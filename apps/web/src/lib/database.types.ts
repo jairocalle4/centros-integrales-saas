@@ -1068,6 +1068,7 @@ export type Database = {
           first_name: string
           id: string
           last_name: string
+          onboarding_completed: boolean
           updated_at: string
         }
         Insert: {
@@ -1075,6 +1076,7 @@ export type Database = {
           first_name: string
           id: string
           last_name: string
+          onboarding_completed?: boolean
           updated_at?: string
         }
         Update: {
@@ -1082,6 +1084,7 @@ export type Database = {
           first_name?: string
           id?: string
           last_name?: string
+          onboarding_completed?: boolean
           updated_at?: string
         }
         Relationships: []

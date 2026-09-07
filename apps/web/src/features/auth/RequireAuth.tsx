@@ -4,10 +4,10 @@ import { useAuth } from './AuthProvider';
 import { supabase } from '../../lib/supabase';
 
 export function RequireAuth() {
-  const { session, isLoading } = useAuth();
+  const { session, isLoading, onboardingCompleted } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (isLoading || (session && onboardingCompleted === null)) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center space-y-4">
@@ -20,6 +20,15 @@ export function RequireAuth() {
 
   if (!session) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Candado real: una sesión válida (ej. del enlace mágico de una
+  // invitación) no basta para entrar si todavía no completó "Crea tu
+  // Contraseña" — sin importar cómo llegó aquí (botón atrás, URL
+  // directa, refresh). ResetPassword.tsx resuelve solo los datos que
+  // le falten si no vino de la navegación original.
+  if (onboardingCompleted === false) {
+    return <Navigate to="/reset-password" state={{ isFirstTime: true }} replace />;
   }
 
   return <Outlet />;

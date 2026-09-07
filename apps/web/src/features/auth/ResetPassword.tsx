@@ -34,9 +34,13 @@ export function ResetPassword() {
   const navigate = useNavigate();
   const location = useLocation();
   const isFirstTime = location.state?.isFirstTime || false;
-  const orgNameFromState = location.state?.orgName || '';
-  const orgIdFromState = location.state?.orgId || '';
-  const userRole = location.state?.userRole || 'staff';
+  // Cuando llega desde la navegación original de AcceptInvitation.tsx,
+  // location.state ya trae esto. Cuando llega en cambio porque
+  // RequireAuth.tsx lo mandó de vuelta aquí (botón atrás, URL directa,
+  // refresh — sin ese state), se resuelve solo desde la base más abajo.
+  const [orgNameFromState, setOrgNameFromState] = useState(location.state?.orgName || '');
+  const [orgIdFromState, setOrgIdFromState] = useState(location.state?.orgId || '');
+  const [userRole, setUserRole] = useState(location.state?.userRole || 'staff');
   const isOwner = userRole === 'owner';
   
   const {
@@ -62,6 +66,28 @@ export function ResetPassword() {
       }
     });
   }, [navigate]);
+
+  useEffect(() => {
+    // Si isFirstTime llegó sin los datos del centro (porque RequireAuth
+    // mandó de vuelta aquí sin el location.state original de
+    // AcceptInvitation), resolverlo directo — accept_invitation ya creó
+    // la membresía real, así que ya existe de dónde leerlo.
+    if (!isFirstTime || orgIdFromState) return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: membership } = await supabase
+        .from('organization_members')
+        .select('role, organization_id, organizations ( name )')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (membership) {
+        setOrgIdFromState((membership as any).organization_id || '');
+        setOrgNameFromState((membership as any).organizations?.name || '');
+        setUserRole((membership as any).role || 'staff');
+      }
+    })();
+  }, [isFirstTime, orgIdFromState]);
 
   useEffect(() => {
     if (orgNameFromState) {
@@ -95,16 +121,19 @@ export function ResetPassword() {
       if (authError) throw authError;
 
       if (isFirstTime && userData.user) {
-        // Upsert profile (creates row if it doesn't exist yet)
+        // Upsert profile (creates row if it doesn't exist yet). Marca
+        // onboarding_completed = true — esto es lo que apaga el candado
+        // de RequireAuth.tsx para esta persona de aquí en adelante.
         const { error: profileError } = await supabase
           .from('profiles')
           .upsert({
             id: userData.user.id,
             first_name: data.firstName?.trim() || '',
             last_name: data.lastName?.trim() || '',
+            onboarding_completed: true,
             updated_at: new Date().toISOString()
           });
-          
+
         if (profileError) throw profileError;
 
         // Update organization name if owner changed it
@@ -116,6 +145,14 @@ export function ResetPassword() {
             
           if (orgError) throw orgError;
         }
+      } else if (userData.user) {
+        // Recuperación normal (no isFirstTime): igual cuenta como
+        // "puso su propia contraseña" — por si alguien llega aquí sin
+        // haber completado nunca el flujo de primera vez.
+        await supabase
+          .from('profiles')
+          .update({ onboarding_completed: true, updated_at: new Date().toISOString() })
+          .eq('id', userData.user.id);
       }
 
       toast.success(isFirstTime ? 'Cuenta configurada con éxito' : 'Contraseña actualizada');

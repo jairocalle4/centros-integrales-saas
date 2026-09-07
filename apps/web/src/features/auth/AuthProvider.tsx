@@ -7,6 +7,11 @@ interface AuthContextType {
   session: Session | null;
   user: User | null;
   isLoading: boolean;
+  // null mientras se está consultando; una vez resuelto, false significa
+  // que a esta persona todavía le falta terminar "Crea tu Contraseña"
+  // (ver profiles.onboarding_completed) — RequireAuth usa esto para no
+  // dejarla entrar a /app aunque ya tenga una sesión válida.
+  onboardingCompleted: boolean | null;
   signOut: () => Promise<void>;
 }
 
@@ -16,23 +21,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
 
   useEffect(() => {
+    const applySession = async (newSession: Session | null) => {
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
+      if (!newSession?.user) {
+        setOnboardingCompleted(null);
+        setIsLoading(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', newSession.user.id)
+        .maybeSingle();
+      // Ante cualquier duda (fila todavía no existe, error de red) se
+      // asume completo — el candado nunca debe bloquear a alguien por
+      // un problema de lectura ajeno a su propio onboarding real.
+      setOnboardingCompleted(error || !data ? true : (data as any).onboarding_completed);
+      setIsLoading(false);
+    };
+
     // Fetch initial session
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) {
         console.error('Error fetching session:', error.message);
       }
-      setSession(session);
-      setUser(session?.user ?? null);
-      setIsLoading(false);
+      applySession(session);
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setIsLoading(false);
+      applySession(session);
     });
 
     return () => {
@@ -45,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, isLoading, signOut }}>
+    <AuthContext.Provider value={{ session, user, isLoading, onboardingCompleted, signOut }}>
       {children}
     </AuthContext.Provider>
   );
