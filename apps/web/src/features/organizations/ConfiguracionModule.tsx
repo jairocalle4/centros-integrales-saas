@@ -21,6 +21,49 @@ export function ConfiguracionModule() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    setLoadingProfile(true);
+    supabase
+      .from('profiles')
+      .select('first_name, last_name')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setFirstName((data as any).first_name || '');
+          setLastName((data as any).last_name || '');
+        }
+        setLoadingProfile(false);
+      });
+  }, [user]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (!firstName.trim() || !lastName.trim()) {
+      toast.error('El nombre y el apellido no pueden estar vacíos.');
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ first_name: firstName.trim(), last_name: lastName.trim(), updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (error) throw error;
+      toast.success('Datos actualizados.');
+    } catch (err: any) {
+      toast.error('Error al guardar: ' + err.message);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   const [name, setName] = useState('');
   const [ruc, setRuc] = useState('');
@@ -306,10 +349,52 @@ export function ConfiguracionModule() {
 
       {/* TAB 3: Cambiar Contraseña */}
       {activeTab === 'cuenta' && (
-        <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-          <form onSubmit={handleChangePassword} className="space-y-5 max-w-md">
+        <div className="bg-white rounded-b-2xl rounded-tr-2xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-10">
+          <form onSubmit={handleSaveProfile} className="space-y-5 max-w-md">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Mis Datos</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Sesión: {user?.email}</p>
+            </div>
+            {loadingProfile ? (
+              <p className="text-sm text-slate-400">Cargando...</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
+                    <input
+                      type="text"
+                      required
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Apellido</label>
+                    <input
+                      type="text"
+                      required
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      className="block w-full rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3.5 py-2.5 border"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingProfile}
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-xs disabled:opacity-50 transition-colors"
+                >
+                  {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {savingProfile ? 'Guardando...' : 'Guardar Datos'}
+                </button>
+              </>
+            )}
+          </form>
+
+          <form onSubmit={handleChangePassword} className="space-y-5 max-w-md pt-8 border-t border-slate-100">
             <h3 className="text-sm font-bold text-slate-900">Cambiar Contraseña</h3>
-            <p className="text-xs text-slate-500 -mt-3">Sesión: {user?.email}</p>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña actual</label>
