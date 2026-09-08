@@ -41,7 +41,10 @@ type RecentCharge = {
 };
 
 export function AppDashboard() {
-  const { currentOrg } = useOrg();
+  const { currentOrg, currentRole } = useOrg();
+  // Profesional/Staff solo ven el calendario — nada de cifras de cobros
+  // ni accesos rápidos a áreas administrativas/financieras.
+  const isOwnerOrAdmin = currentRole === 'owner' || currentRole === 'admin';
   const [kpis, setKpis] = useState<KpiData | null>(null);
   const [recentCharges, setRecentCharges] = useState<RecentCharge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,17 +181,25 @@ export function AppDashboard() {
             {formatDateWithWeekday(new Date())}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/app/matricula"
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors"
-          >
-            <PlusCircle className="w-4 h-4" />
-            Nueva Matrícula
-          </Link>
-        </div>
+        {isOwnerOrAdmin && (
+          <div className="flex items-center gap-2">
+            <Link
+              to="/app/matricula"
+              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors"
+            >
+              <PlusCircle className="w-4 h-4" />
+              Nueva Matrícula
+            </Link>
+          </div>
+        )}
       </div>
 
+      {!isOwnerOrAdmin ? (
+        <div className="animate-fadeInUp" style={{ animationDelay: '80ms' }}>
+          <DashboardCalendar />
+        </div>
+      ) : (
+      <>
       {/* KPIs */}
       {loading ? (
         <SkeletonCards count={4} />
@@ -376,6 +387,8 @@ export function AppDashboard() {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -364,11 +364,14 @@ function VoidExpenseModal({ expense, onClose, onVoided }: { expense: ExpenseRow;
 // ─── Módulo principal ────────────────────────────────────────────────
 export function GastosModule() {
   const { currentOrg, currentRole } = useOrg();
-  // Ver es abierto a cualquier rol (igual que la RLS); registrar/editar/
-  // anular queda para owner/admin/staff — professional no tiene control
-  // financiero (docs/product/ROLES_PERMISSIONS.md), mismo criterio que
-  // ya rige charges/internal_payments.
-  const canManage = currentRole === 'owner' || currentRole === 'admin' || currentRole === 'staff';
+  // Gastos es Dueño/Administrador únicamente (ni ver ni editar para
+  // professional/staff) — esquema de permisos por rol ya aplicado en
+  // RLS (migración 20260907110000_role_based_permissions_scheme.sql).
+  // Esta constante había quedado desactualizada frente a esa política
+  // (todavía incluía a staff); con RequireOwnerOrAdmin en la ruta esto
+  // ya casi no importa en la práctica, pero se corrige para que no
+  // quede una inconsistencia real entre la UI y la base de datos.
+  const canManage = currentRole === 'owner' || currentRole === 'admin';
 
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);

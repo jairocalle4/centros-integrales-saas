@@ -4,8 +4,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { supabase } from '../../lib/supabase';
 import { useNavigate, useLocation } from 'react-router';
-import { Building2, Pencil, Loader2 } from 'lucide-react';
+import { Building2, Pencil, Loader2, Eye, EyeOff, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuth } from './AuthProvider';
 
 const resetSchema = z.object({
   password: z.string()
@@ -30,9 +31,10 @@ export function ResetPassword() {
   const [isEditingOrg, setIsEditingOrg] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
+
   const navigate = useNavigate();
   const location = useLocation();
+  const { markOnboardingComplete } = useAuth();
   const isFirstTime = location.state?.isFirstTime || false;
   // Cuando llega desde la navegación original de AcceptInvitation.tsx,
   // location.state ya trae esto. Cuando llega en cambio porque
@@ -42,7 +44,7 @@ export function ResetPassword() {
   const [orgIdFromState, setOrgIdFromState] = useState(location.state?.orgId || '');
   const [userRole, setUserRole] = useState(location.state?.userRole || 'staff');
   const isOwner = userRole === 'owner';
-  
+
   const {
     register,
     handleSubmit,
@@ -97,7 +99,7 @@ export function ResetPassword() {
 
   const onSubmit = async (data: ResetForm) => {
     setError(null);
-    
+
     if (isFirstTime) {
       if (!data.firstName?.trim()) {
         setError('Por favor, ingresa tu nombre.');
@@ -135,6 +137,11 @@ export function ResetPassword() {
           });
 
         if (profileError) throw profileError;
+        // Corrige el candado en el contexto al instante — no esperar al
+        // re-fetch disparado por USER_UPDATED, que puede llegar antes que
+        // este mismo upsert y quedarse con el valor viejo (ver comentario
+        // en AuthProvider.tsx).
+        markOnboardingComplete();
 
         // Update organization name if owner changed it
         if (isOwner && data.orgName !== orgNameFromState && orgIdFromState) {
@@ -142,7 +149,7 @@ export function ResetPassword() {
             .from('organizations')
             .update({ name: data.orgName?.trim() })
             .eq('id', orgIdFromState);
-            
+
           if (orgError) throw orgError;
         }
       } else if (userData.user) {
@@ -153,6 +160,7 @@ export function ResetPassword() {
           .from('profiles')
           .update({ onboarding_completed: true, updated_at: new Date().toISOString() })
           .eq('id', userData.user.id);
+        markOnboardingComplete();
       }
 
       toast.success(isFirstTime ? 'Cuenta configurada con éxito' : 'Contraseña actualizada');
@@ -171,43 +179,53 @@ export function ResetPassword() {
   if (!sessionChecked) return null;
 
   return (
-    <div className="flex min-h-screen flex-col justify-center py-12 sm:px-6 lg:px-8 bg-gray-50">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-gray-900">
-          {isFirstTime ? 'Crea tu Contraseña' : 'Actualizar Contraseña'}
-        </h2>
-        <p className="mt-2 text-center text-sm text-gray-600">
-          {isFirstTime 
-            ? 'Para terminar de configurar tu cuenta en NexoKids, ingresa tus datos y establece una contraseña segura.' 
-            : 'Ingresa tu nueva contraseña para acceder a NexoKids.'}
-        </p>
-      </div>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 py-12">
+      <div className="w-full max-w-md">
+        {/* Marca */}
+        <div className="flex items-center justify-center gap-2.5 mb-8">
+          <div className="w-9 h-9 bg-indigo-600 rounded-lg shadow-sm flex items-center justify-center text-white">
+            <span className="text-base font-bold tracking-tighter">NK</span>
+          </div>
+          <span className="text-xl font-bold tracking-tight text-slate-900">NexoKids</span>
+        </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white px-4 py-8 shadow sm:rounded-lg sm:px-10 border border-gray-100">
-          
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200/70 p-7 sm:p-9">
+          <div className="text-center mb-6">
+            <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <KeyRound className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-900">
+              {isFirstTime ? 'Crea tu Contraseña' : 'Actualizar Contraseña'}
+            </h2>
+            <p className="mt-1.5 text-sm text-slate-500">
+              {isFirstTime
+                ? 'Para terminar de configurar tu cuenta en NexoKids, ingresa tus datos y establece una contraseña segura.'
+                : 'Ingresa tu nueva contraseña para acceder a NexoKids.'}
+            </p>
+          </div>
+
           {isFirstTime && orgNameFromState && (
-            <div className="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-100 flex items-start gap-3">
-              <Building2 className="w-5 h-5 text-indigo-600 mt-0.5 shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-indigo-900">Te estás uniendo al centro:</p>
+            <div className="mb-6 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-white text-indigo-600 flex items-center justify-center shrink-0 shadow-xs">
+                <Building2 className="w-4.5 h-4.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider">Te estás uniendo a</p>
                 {isEditingOrg && isOwner ? (
-                  <div className="mt-2">
-                    <input
-                      type="text"
-                      {...register('orgName')}
-                      className="block w-full rounded-md border border-indigo-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      placeholder="Nombre de la empresa"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    {...register('orgName')}
+                    className="mt-1 block w-full rounded-lg border border-indigo-200 px-3 py-1.5 text-sm font-semibold text-slate-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="Nombre de la empresa"
+                  />
                 ) : (
-                  <div className="flex items-center gap-2 mt-1">
-                    <p className="text-indigo-800 font-bold">{orgNameFromState}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-sm font-bold text-indigo-900 truncate">{orgNameFromState}</p>
                     {isOwner && (
-                      <button 
-                        type="button" 
+                      <button
+                        type="button"
                         onClick={() => setIsEditingOrg(true)}
-                        className="p-1 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-100 rounded-md transition-colors"
+                        className="p-1 text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 rounded-md transition-colors shrink-0 cursor-pointer"
                         title="Modificar nombre de empresa"
                       >
                         <Pencil className="w-3.5 h-3.5" />
@@ -219,113 +237,87 @@ export function ResetPassword() {
             </div>
           )}
 
-          <form className="space-y-5" onSubmit={handleSubmit(onSubmit)}>
+          <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
             {error && (
-              <div className="rounded-md bg-red-50 p-4">
-                <div className="flex">
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-red-800">{error}</h3>
-                  </div>
-                </div>
+              <div className="rounded-xl bg-red-50 border border-red-100 p-3.5">
+                <p className="text-sm font-medium text-red-700">{error}</p>
               </div>
             )}
 
             {isFirstTime && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="firstName" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="firstName" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                     Nombre
                   </label>
-                  <div className="mt-1">
-                    <input
-                      id="firstName"
-                      type="text"
-                      {...register('firstName')}
-                      className="block w-full appearance-none rounded-md border border-gray-300 px-3 py-2 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
-                    />
-                  </div>
+                  <input
+                    id="firstName"
+                    type="text"
+                    {...register('firstName')}
+                    className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+                  />
                 </div>
                 <div>
-                  <label htmlFor="lastName" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="lastName" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                     Apellido
                   </label>
-                  <div className="mt-1">
-                    <input
-                      id="lastName"
-                      type="text"
-                      {...register('lastName')}
-                      className="block w-full appearance-none rounded-md border border-gray-300 px-3 py-2 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
-                    />
-                  </div>
+                  <input
+                    id="lastName"
+                    type="text"
+                    {...register('lastName')}
+                    className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+                  />
                 </div>
               </div>
             )}
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 {isFirstTime ? 'Contraseña Segura' : 'Nueva Contraseña'}
               </label>
-              <div className="mt-1 relative">
+              <div className="relative">
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   {...register('password')}
-                  className="block w-full appearance-none rounded-md border border-gray-300 px-3 py-2 pr-10 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                  className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 pr-11 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 focus:outline-none"
+                  className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
                   aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 >
-                  {showPassword ? (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.858A9.954 9.954 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.592-4.592a3 3 0 11-4.243-4.243m4.242 4.242L3 3l18 18" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
+                  {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
                 </button>
               </div>
               {errors.password && (
-                <p className="mt-2 text-sm text-red-600">{errors.password.message}</p>
+                <p className="mt-1.5 text-xs text-red-600">{errors.password.message}</p>
               )}
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="confirmPassword" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Confirmar Contraseña
               </label>
-              <div className="mt-1 relative">
+              <div className="relative">
                 <input
                   id="confirmPassword"
                   type={showConfirmPassword ? 'text' : 'password'}
                   {...register('confirmPassword')}
-                  className="block w-full appearance-none rounded-md border border-gray-300 px-3 py-2 pr-10 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                  className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 pr-11 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 focus:outline-none"
+                  className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
                   aria-label={showConfirmPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 >
-                  {showConfirmPassword ? (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.858A9.954 9.954 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.592-4.592a3 3 0 11-4.243-4.243m4.242 4.242L3 3l18 18" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
+                  {showConfirmPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
                 </button>
               </div>
               {errors.confirmPassword && (
-                <p className="mt-2 text-sm text-red-600">{errors.confirmPassword.message}</p>
+                <p className="mt-1.5 text-xs text-red-600">{errors.confirmPassword.message}</p>
               )}
             </div>
 
@@ -333,7 +325,7 @@ export function ResetPassword() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex w-full justify-center items-center gap-2 rounded-md border border-transparent bg-indigo-600 py-2.5 px-4 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-indigo-400 disabled:cursor-not-allowed transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 px-4 text-sm font-bold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:bg-indigo-400 transition-colors cursor-pointer"
               >
                 {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 {isSubmitting ? 'Guardando...' : (isFirstTime ? 'Comenzar a usar NexoKids' : 'Actualizar contraseña')}

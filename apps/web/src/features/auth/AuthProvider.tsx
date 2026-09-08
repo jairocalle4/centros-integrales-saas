@@ -12,6 +12,16 @@ interface AuthContextType {
   // (ver profiles.onboarding_completed) — RequireAuth usa esto para no
   // dejarla entrar a /app aunque ya tenga una sesión válida.
   onboardingCompleted: boolean | null;
+  // Marca el onboarding como completo en el contexto al instante, sin
+  // depender de un re-fetch. Necesario porque supabase.auth.updateUser()
+  // dispara un evento USER_UPDATED que hace que este mismo Provider
+  // vuelva a leer profiles.onboarding_completed desde la base — y ese
+  // re-fetch puede ganarle en la carrera a la escritura que el propio
+  // formulario de "Crea tu Contraseña" hace unas líneas después (un
+  // UPDATE de tabla normal no dispara ningún evento de auth que lo
+  // vuelva a corregir). Sin esto, el contexto se queda pegado en false
+  // y RequireAuth rebota de vuelta al formulario aunque ya se guardó todo.
+  markOnboardingComplete: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -66,8 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  const markOnboardingComplete = () => setOnboardingCompleted(true);
+
   return (
-    <AuthContext.Provider value={{ session, user, isLoading, onboardingCompleted, signOut }}>
+    <AuthContext.Provider value={{ session, user, isLoading, onboardingCompleted, markOnboardingComplete, signOut }}>
       {children}
     </AuthContext.Provider>
   );

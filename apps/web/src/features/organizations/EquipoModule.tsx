@@ -11,14 +11,16 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { formatDate } from '../../lib/formatDate';
 
 type Member = {
-  id: string;
+  // El id que devuelve get_organization_users es el de auth.users
+  // (u.id) — no hay un id de fila de organization_members separado, así
+  // que las mutaciones de abajo apuntan por (organization_id, user_id)
+  // en vez de por un id de membresía.
   user_id: string;
   role: string;
   status: string;
-  profiles: {
-    first_name: string | null;
-    last_name: string | null;
-  } | null;
+  first_name: string;
+  last_name: string;
+  email: string;
 };
 
 type Invitation = {
@@ -111,22 +113,23 @@ export function EquipoModule() {
 
   const loadMembers = async (orgId: string) => {
     setLoadingMembers(true);
-    const { data, error } = await supabase
-      .from('organization_members')
-      .select(`
-        id,
-        user_id,
-        role,
-        status,
-        profiles (
-          first_name,
-          last_name
-        )
-      `)
-      .eq('organization_id', orgId);
+    // get_organization_users ya existe (la usa superadmin en
+    // PlatformOrganizationDetail.tsx) y ya permite que cualquier
+    // owner/admin del propio centro la llame — trae el correo real,
+    // que la consulta directa a organization_members nunca traía (por
+    // eso un integrante sin nombre quedaba como "Usuario" sin ninguna
+    // forma de identificarlo).
+    const { data, error } = await supabase.rpc('get_organization_users', { p_organization_id: orgId });
 
     if (!error && data) {
-      setMembers(data as Member[]);
+      setMembers((data as any[]).map((m) => ({
+        user_id: m.id,
+        role: m.role,
+        status: m.status,
+        first_name: m.first_name || '',
+        last_name: m.last_name || '',
+        email: m.email,
+      })));
     }
     setLoadingMembers(false);
   };
@@ -163,11 +166,12 @@ export function EquipoModule() {
 
   const onChangeRole = async (member: Member, newRole: string) => {
     if (!currentOrg || newRole === member.role) return;
-    setSavingRoleFor(member.id);
+    setSavingRoleFor(member.user_id);
     const { error } = await supabase
       .from('organization_members')
       .update({ role: newRole as 'admin' | 'professional' | 'staff' })
-      .eq('id', member.id);
+      .eq('organization_id', currentOrg.id)
+      .eq('user_id', member.user_id);
     setSavingRoleFor(null);
 
     if (error) {
@@ -186,11 +190,12 @@ export function EquipoModule() {
   const onToggleMemberActive = async (member: Member) => {
     if (!currentOrg) return;
     const activating = member.status !== 'active';
-    setRemovingId(member.id);
+    setRemovingId(member.user_id);
     const { error } = await supabase
       .from('organization_members')
       .update({ status: activating ? 'active' : 'inactive' })
-      .eq('id', member.id);
+      .eq('organization_id', currentOrg.id)
+      .eq('user_id', member.user_id);
     setRemovingId(null);
     setConfirmRemoveId(null);
 
@@ -344,11 +349,11 @@ export function EquipoModule() {
                 const reactivateBlocked = !isActiveMember && seatsLimitReached;
 
                 return (
-                  <li key={member.id} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-x-6 py-4 ${!isActiveMember ? 'opacity-60' : ''}`}>
+                  <li key={member.user_id} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-x-6 py-4 ${!isActiveMember ? 'opacity-60' : ''}`}>
                     <div className="min-w-0">
                       <div className="flex items-center gap-x-3 flex-wrap">
                         <p className="text-sm font-semibold text-slate-900 truncate">
-                          {member.profiles?.first_name || 'Usuario'} {member.profiles?.last_name || ''}
+                          {member.first_name || member.last_name ? `${member.first_name || ''} ${member.last_name || ''}`.trim() : member.email}
                           {isSelf && <span className="text-slate-400 font-normal"> (tú)</span>}
                         </p>
                         <span
@@ -363,6 +368,9 @@ export function EquipoModule() {
                           {member.role === 'owner' ? 'Dueño' : member.role}
                         </span>
                       </div>
+                      {(member.first_name || member.last_name) && (
+                        <p className="text-xs text-slate-500 truncate mt-0.5">{member.email}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
                       <span className={`text-xs font-medium px-2.5 py-1 rounded-full border flex items-center gap-1 ${
@@ -378,7 +386,7 @@ export function EquipoModule() {
                         <>
                           <select
                             value={member.role}
-                            disabled={savingRoleFor === member.id}
+                            disabled={savingRoleFor === member.user_id}
                             onChange={(e) => onChangeRole(member, e.target.value)}
                             className="text-xs rounded-lg border-slate-300 shadow-xs focus:border-indigo-500 focus:ring-indigo-500 py-1.5 pl-2 pr-7 border bg-white disabled:opacity-50"
                           >
@@ -390,20 +398,20 @@ export function EquipoModule() {
                           {!isActiveMember ? (
                             <button
                               onClick={() => onToggleMemberActive(member)}
-                              disabled={removingId === member.id || reactivateBlocked}
+                              disabled={removingId === member.user_id || reactivateBlocked}
                               title={reactivateBlocked ? 'Llegaste al límite de usuarios de tu plan' : undefined}
                               className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                             >
-                              {removingId === member.id ? 'Reactivando...' : 'Reactivar'}
+                              {removingId === member.user_id ? 'Reactivando...' : 'Reactivar'}
                             </button>
-                          ) : confirmRemoveId === member.id ? (
+                          ) : confirmRemoveId === member.user_id ? (
                             <div className="flex items-center gap-1.5">
                               <button
                                 onClick={() => onToggleMemberActive(member)}
-                                disabled={removingId === member.id}
+                                disabled={removingId === member.user_id}
                                 className="text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer"
                               >
-                                {removingId === member.id ? 'Desactivando...' : 'Confirmar'}
+                                {removingId === member.user_id ? 'Desactivando...' : 'Confirmar'}
                               </button>
                               <button
                                 onClick={() => setConfirmRemoveId(null)}
@@ -414,7 +422,7 @@ export function EquipoModule() {
                             </div>
                           ) : (
                             <button
-                              onClick={() => setConfirmRemoveId(member.id)}
+                              onClick={() => setConfirmRemoveId(member.user_id)}
                               title="Le quita el acceso al centro sin borrar su historial — se puede reactivar después"
                               className="text-xs font-semibold text-amber-700 hover:text-amber-800 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
                             >

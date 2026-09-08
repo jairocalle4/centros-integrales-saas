@@ -30,6 +30,7 @@ import { ConfiguracionModule } from './features/organizations/ConfiguracionModul
 import { BeneficiaryDetailPage } from './features/organizations/BeneficiaryDetailPage';
 import { FinancialDashboard } from './features/organizations/FinancialDashboard';
 import { GastosModule } from './features/organizations/GastosModule';
+import { RequireOwnerOrAdmin } from './features/organizations/RequireOwnerOrAdmin';
 
 const queryClient = new QueryClient();
 
@@ -80,25 +81,30 @@ createRoot(document.getElementById('root')!).render(
                   element={<CobrosModule />}
                 />
                 <Route
-                  path="gastos"
-                  element={<GastosModule />}
-                />
-                <Route
-                  path="facturas"
-                  element={<FacturasModule />}
-                />
-                <Route
                   path="equipo"
                   element={<EquipoModule />}
                 />
-                <Route
-                  path="configuracion"
-                  element={<ConfiguracionModule />}
-                />
-                <Route
-                  path="finanzas"
-                  element={<FinancialDashboard />}
-                />
+
+                {/* Solo Dueño/Administrador — RequireOwnerOrAdmin cierra
+                    el acceso directo por URL, no solo el link del menú. */}
+                <Route element={<RequireOwnerOrAdmin />}>
+                  <Route
+                    path="gastos"
+                    element={<GastosModule />}
+                  />
+                  <Route
+                    path="facturas"
+                    element={<FacturasModule />}
+                  />
+                  <Route
+                    path="configuracion"
+                    element={<ConfiguracionModule />}
+                  />
+                  <Route
+                    path="finanzas"
+                    element={<FinancialDashboard />}
+                  />
+                </Route>
               </Route>
             </Route>
 
