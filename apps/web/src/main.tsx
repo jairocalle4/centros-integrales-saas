@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -28,9 +28,24 @@ import { FacturasModule } from './features/organizations/FacturasModule';
 import { EquipoModule } from './features/organizations/EquipoModule';
 import { ConfiguracionModule } from './features/organizations/ConfiguracionModule';
 import { BeneficiaryDetailPage } from './features/organizations/BeneficiaryDetailPage';
-import { FinancialDashboard } from './features/organizations/FinancialDashboard';
 import { GastosModule } from './features/organizations/GastosModule';
 import { RequireOwnerOrAdmin } from './features/organizations/RequireOwnerOrAdmin';
+
+// Carga perezosa: es la única pantalla que usa Recharts (gráficos de
+// Reportes), y solo la ve Dueño/Administrador (RequireOwnerOrAdmin más
+// abajo) — así el resto de roles, que nunca la visitan, no paga ese peso
+// en el bundle principal.
+const FinancialDashboard = lazy(() =>
+  import('./features/organizations/FinancialDashboard').then((m) => ({ default: m.FinancialDashboard }))
+);
+
+function RouteFallback() {
+  return (
+    <div className="flex h-full min-h-[50vh] items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600"></div>
+    </div>
+  );
+}
 
 const queryClient = new QueryClient();
 
@@ -102,7 +117,11 @@ createRoot(document.getElementById('root')!).render(
                   />
                   <Route
                     path="finanzas"
-                    element={<FinancialDashboard />}
+                    element={
+                      <Suspense fallback={<RouteFallback />}>
+                        <FinancialDashboard />
+                      </Suspense>
+                    }
                   />
                 </Route>
               </Route>

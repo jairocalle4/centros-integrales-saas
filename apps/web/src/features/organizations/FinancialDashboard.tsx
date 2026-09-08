@@ -5,6 +5,20 @@ import { formatDate } from '../../lib/formatDate';
 import { Link } from 'react-router';
 import toast from 'react-hot-toast';
 import { Calendar, Search, Loader2, CreditCard, Wallet, TrendingUp, TrendingDown } from 'lucide-react';
+import {
+  BarChart as ReBarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Sector,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
+import type { PieSectorShapeProps } from 'recharts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -249,9 +263,50 @@ function KpiCard({
   );
 }
 
-// Dona genérica — se reutiliza para asistencia, método de pago y estado de
-// facturación electrónica: cada uno decide qué representa `value` (conteo de
-// sesiones, suma en dólares, conteo de comprobantes) vía `formatValue`.
+// Tarjeta de tooltip compartida por los 3 gráficos de Recharts — mismo
+// lenguaje visual (rounded-lg, sombra, borde sutil) que el resto de la app
+// en vez del tooltip cuadrado por defecto de la librería.
+function ChartTooltipCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-lg shadow-lg border border-slate-100 px-3 py-2 text-xs pointer-events-none">
+      {children}
+    </div>
+  );
+}
+
+function DonutTooltip({ active, payload, formatValue, total }: {
+  active?: boolean;
+  payload?: { payload: DonutStat }[];
+  formatValue: (v: number) => string;
+  total: number;
+}) {
+  if (!active || !payload?.length) return null;
+  const stat = payload[0].payload;
+  const pct = total > 0 ? Math.round((stat.value / total) * 100) : 0;
+  return (
+    <ChartTooltipCard>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: stat.color }} />
+        <span className="font-semibold text-slate-800">{stat.label}</span>
+      </div>
+      <p className="text-slate-500">{formatValue(stat.value)} · {pct}%</p>
+    </ChartTooltipCard>
+  );
+}
+
+// El sector activo (hover) se dibuja levemente más grande — reemplaza el
+// prop `activeShape` (deprecado en Recharts v3) por `shape`, que recibe
+// `isActive` por cada sector.
+function ActiveDonutSector(props: PieSectorShapeProps) {
+  const { isActive, outerRadius, ...rest } = props;
+  return <Sector {...rest} outerRadius={outerRadius + (isActive ? 5 : 0)} />;
+}
+
+// Dona genérica — se reutiliza para asistencia, método de pago y gastos por
+// categoría: cada uno decide qué representa `value` (conteo de sesiones,
+// suma en dólares) vía `formatValue`. Ahora animada e interactiva (Recharts):
+// cada sector crece un poco al pasar el mouse y muestra un tooltip con el
+// detalle exacto, en vez del SVG estático de antes.
 function DonutChart({
   stats,
   total,
@@ -263,13 +318,6 @@ function DonutChart({
   centerLabel: string;
   formatValue?: (v: number) => string;
 }) {
-  const radius = 50;
-  const cx = 70;
-  const cy = 70;
-  const circumference = 2 * Math.PI * radius;
-
-  let cumulativeAngle = -90;
-
   return (
     // Antes iba lado a lado con la dona (140px) + leyenda — en tarjetas
     // angostas (3-4 columnas) el monto y el porcentaje no cabían y se
@@ -277,35 +325,37 @@ function DonutChart({
     // a todo el ancho) la leyenda siempre tiene todo el ancho disponible
     // de la tarjeta, sin importar qué tan angosta sea.
     <div className="flex flex-col items-center gap-4 w-full min-w-0">
-      <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0">
-        <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#f1f5f9" strokeWidth="20" />
-        {stats.map((stat, i) => {
-          if (total === 0 || stat.value === 0) return null;
-          const pct = stat.value / total;
-          const dash = pct * circumference;
-          const gap = circumference - dash;
-          const angle = cumulativeAngle;
-          cumulativeAngle += pct * 360;
-          return (
-            <circle
-              key={i}
-              cx={cx}
-              cy={cy}
-              r={radius}
-              fill="none"
-              stroke={stat.color}
-              strokeWidth="20"
-              strokeDasharray={`${dash} ${gap}`}
-              strokeDashoffset={(-circumference * (angle + 90)) / 360}
-              style={{ transform: `rotate(${angle}deg)`, transformOrigin: `${cx}px ${cy}px`, transition: 'stroke-dasharray 0.6s ease-out' }}
-            />
-          );
-        })}
-        <text x={cx} y={cy - 5} textAnchor="middle" fontSize="15" fontWeight="bold" fill="#0f172a">
-          {formatValue(total)}
-        </text>
-        <text x={cx} y={cy + 12} textAnchor="middle" fontSize="9" fill="#94a3b8">{centerLabel}</text>
-      </svg>
+      <div className="relative w-[140px] h-[140px] shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={stats}
+              dataKey="value"
+              nameKey="label"
+              cx="50%"
+              cy="50%"
+              innerRadius={42}
+              outerRadius={62}
+              paddingAngle={stats.length > 1 ? 3 : 0}
+              startAngle={90}
+              endAngle={-270}
+              stroke="none"
+              shape={ActiveDonutSector}
+              animationDuration={700}
+              animationEasing="ease-out"
+            >
+              {stats.map((stat, i) => (
+                <Cell key={i} fill={stat.color} />
+              ))}
+            </Pie>
+            <Tooltip content={<DonutTooltip formatValue={formatValue} total={total} />} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span className="text-[15px] font-bold text-slate-900">{formatValue(total)}</span>
+          <span className="text-[9px] text-slate-400">{centerLabel}</span>
+        </div>
+      </div>
       <div className="w-full space-y-2.5 min-w-0">
         {stats.map((stat, i) => (
           <div key={i} className="flex items-center gap-2 min-w-0">
@@ -322,81 +372,91 @@ function DonutChart({
   );
 }
 
-// Alto reservado para las barras y para la etiqueta de monto por encima de
-// ellas — separados a propósito: antes la etiqueta se ubicaba con un % de
-// una altura en px (confundiendo unidades) y con la barra más alta
-// terminaba con `top: 0` desplazada además hacia arriba por su propio
-// alto, saliéndose del todo de la tarjeta (se veía tapando el título
-// "Ingresos"). Con alto de barra y espacio de etiqueta fijos en píxeles,
-// ninguna etiqueta puede salirse del contenedor sin importar qué tan alta
-// sea la barra.
-const BAR_MAX_HEIGHT = 92;
-const BAR_LABEL_SPACE = 26;
+// Alto del gráfico de ingresos — mismo valor usado por el chart real y por
+// el skeleton de carga, para que la tarjeta no salte de tamaño al terminar
+// de cargar.
+const REVENUE_CHART_HEIGHT = 160;
 
-function BarChart({ data }: { data: TrendPoint[] }) {
-  const maxVal = Math.max(...data.map((d) => d.amount), 1);
-  // Con muchas barras (ej. 31 días) mostrar una etiqueta de eje por cada una
-  // se amontona — se muestra 1 de cada N, siempre incluyendo la última.
-  const labelEvery = data.length > 15 ? Math.ceil(data.length / 10) : 1;
-  // El monto de cada barra solo se veía al pasar el mouse — invisible en
-  // móvil y en capturas de pantalla. Con pocas barras con datos (lo normal:
-  // la mayoría de días sin pagos) se muestra siempre; con muchas, se vuelve
-  // a hover para no amontonar el gráfico.
-  const nonZeroCount = data.filter((d) => d.amount > 0).length;
-  const alwaysShowAmount = nonZeroCount > 0 && nonZeroCount <= 12;
+function RevenueTooltip({ active, payload }: { active?: boolean; payload?: { payload: TrendPoint }[] }) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
   return (
-    <div className="flex items-end gap-1.5 w-full" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }}>
-      {data.map((d, i) => {
-        const barHeightPx = maxVal > 0 ? Math.max((d.amount / maxVal) * BAR_MAX_HEIGHT, d.amount > 0 ? 4 : 0) : 0;
-        const isLast = i === data.length - 1;
-        const showAxisLabel = isLast || i % labelEvery === 0;
-        return (
-          <div key={d.key} className="flex flex-col items-center gap-1 flex-1 group/bar min-w-0">
-            <div className="relative w-full flex items-end justify-center" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }}>
-              {d.amount > 0 && (
-                <div
-                  className={`absolute text-[9px] font-bold text-white bg-slate-800 rounded px-1.5 py-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap z-10 transition-opacity ${
-                    alwaysShowAmount ? 'opacity-100' : 'opacity-0 group-hover/bar:opacity-100'
-                  }`}
-                  style={{ bottom: `${barHeightPx + 4}px` }}
-                >
-                  {fmt(d.amount)}
-                </div>
-              )}
-              <div
-                className={`w-full rounded-t-lg transition-all duration-500 ${isLast ? 'bg-indigo-500' : 'bg-indigo-200 group-hover/bar:bg-indigo-300'}`}
-                style={{ height: `${barHeightPx}px` }}
-              />
-            </div>
-            <span className={`text-[9px] font-medium truncate ${isLast ? 'text-indigo-600' : 'text-slate-400'}`}>
-              {showAxisLabel ? d.label : ''}
-            </span>
-          </div>
-        );
-      })}
-    </div>
+    <ChartTooltipCard>
+      <p className="font-bold text-slate-900">{fmt(point.amount)}</p>
+      <p className="text-slate-400">{point.label}</p>
+    </ChartTooltipCard>
   );
 }
 
-function HorizBar({ name, amount, max, rank }: { name: string; amount: number; max: number; rank: number }) {
-  const pct = max > 0 ? (amount / max) * 100 : 0;
-  const colors = ['bg-indigo-500', 'bg-violet-500', 'bg-cyan-500', 'bg-emerald-500', 'bg-amber-500'];
+// Tendencia de ingresos — antes barras dibujadas a mano con divs; ahora un
+// BarChart real de Recharts: entra animado, el eje decide solas cuántas
+// etiquetas caben (en vez del cálculo manual de "1 de cada N" de antes) y
+// el monto exacto de cada barra se ve en un tooltip al pasar el mouse, sin
+// amontonar el gráfico cuando hay muchos días.
+function BarChart({ data }: { data: TrendPoint[] }) {
+  const isLast = (i: number) => i === data.length - 1;
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-xs font-bold text-slate-400 w-4 text-right">{rank}</span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs font-semibold text-slate-700 truncate">{name}</span>
-          <span className="text-xs font-bold text-slate-900 ml-2">{fmt(amount)}</span>
-        </div>
-        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-700 ${colors[rank - 1] || 'bg-slate-400'}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      </div>
-    </div>
+    <ResponsiveContainer width="100%" height={REVENUE_CHART_HEIGHT}>
+      <ReBarChart data={data} margin={{ top: 20, right: 4, left: 4, bottom: 0 }}>
+        <CartesianGrid vertical={false} stroke="#f1f5f9" />
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 10, fill: '#94a3b8' }}
+          tickLine={false}
+          axisLine={false}
+          interval="preserveStartEnd"
+          minTickGap={data.length > 20 ? 8 : 16}
+        />
+        <Tooltip content={<RevenueTooltip />} cursor={{ fill: '#eef2ff' }} />
+        <Bar dataKey="amount" radius={[6, 6, 0, 0]} maxBarSize={32} animationDuration={600} animationEasing="ease-out">
+          {data.map((d, i) => (
+            <Cell key={d.key} fill={isLast(i) ? '#6366f1' : '#c7d2fe'} />
+          ))}
+        </Bar>
+      </ReBarChart>
+    </ResponsiveContainer>
+  );
+}
+
+const TOP_SERVICES_COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b'];
+
+function ServiceTooltip({ active, payload }: { active?: boolean; payload?: { payload: ServiceRevenue }[] }) {
+  if (!active || !payload?.length) return null;
+  const svc = payload[0].payload;
+  return (
+    <ChartTooltipCard>
+      <p className="font-bold text-slate-900">{svc.name}</p>
+      <p className="text-slate-500">{fmt(svc.amount)} · {svc.count} pago{svc.count === 1 ? '' : 's'}</p>
+    </ChartTooltipCard>
+  );
+}
+
+// Ranking de servicios por ingreso — antes barras horizontales dibujadas a
+// mano; ahora un BarChart horizontal de Recharts con el mismo espíritu
+// (nombre a la izquierda, barra a la derecha) pero animado y con tooltip
+// de detalle (monto + número de pagos) al pasar el mouse.
+function TopServicesChart({ data }: { data: ServiceRevenue[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(data.length * 40, 90)}>
+      <ReBarChart data={data} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }} barCategoryGap={12}>
+        <XAxis type="number" hide />
+        <YAxis
+          type="category"
+          dataKey="name"
+          width={104}
+          tick={{ fontSize: 11, fill: '#334155', fontWeight: 600 }}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(name: string, index: number) => `${index + 1}. ${name}`}
+        />
+        <Tooltip content={<ServiceTooltip />} cursor={{ fill: '#f8fafc' }} />
+        <Bar dataKey="amount" radius={[0, 8, 8, 0]} maxBarSize={16} animationDuration={700} animationEasing="ease-out">
+          {data.map((svc, i) => (
+            <Cell key={svc.name} fill={TOP_SERVICES_COLORS[i % TOP_SERVICES_COLORS.length]} />
+          ))}
+        </Bar>
+      </ReBarChart>
+    </ResponsiveContainer>
   );
 }
 
@@ -871,7 +931,6 @@ export function FinancialDashboard() {
   const attTotal = data?.attendanceStats.reduce((s, a) => s + a.value, 0) ?? 0;
   const methodTotal = data?.paymentMethodStats.reduce((s, a) => s + a.value, 0) ?? 0;
   const categoryTotal = data?.expensesByCategory.reduce((s, a) => s + a.value, 0) ?? 0;
-  const maxSvcAmount = data?.topServices[0]?.amount || 1;
 
   return (
     <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%)' }}>
@@ -1172,9 +1231,9 @@ export function FinancialDashboard() {
             </div>
             <div className="flex-1 flex items-end mt-3">
               {loading ? (
-                <div className="w-full animate-pulse bg-slate-100 rounded-xl" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }} />
+                <div className="w-full animate-pulse bg-slate-100 rounded-xl" style={{ height: `${REVENUE_CHART_HEIGHT}px` }} />
               ) : (data?.revenueTrend || []).every((d) => d.amount === 0) ? (
-                <div className="w-full flex items-center justify-center text-slate-400 text-sm" style={{ height: `${BAR_MAX_HEIGHT + BAR_LABEL_SPACE}px` }}>Sin ingresos en el período</div>
+                <div className="w-full flex items-center justify-center text-slate-400 text-sm" style={{ height: `${REVENUE_CHART_HEIGHT}px` }}>Sin ingresos en el período</div>
               ) : (
                 <BarChart data={data?.revenueTrend || []} />
               )}
@@ -1239,11 +1298,7 @@ export function FinancialDashboard() {
             ) : (data?.topServices.length || 0) === 0 ? (
               <div className="h-24 flex items-center justify-center text-slate-400 text-sm">Sin pagos en el período</div>
             ) : (
-              <div className="space-y-4">
-                {data!.topServices.map((svc, i) => (
-                  <HorizBar key={svc.name} name={svc.name} amount={svc.amount} max={maxSvcAmount} rank={i + 1} />
-                ))}
-              </div>
+              <TopServicesChart data={data!.topServices} />
             )}
           </div>
 
