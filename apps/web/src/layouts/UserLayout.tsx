@@ -4,6 +4,7 @@ import { OrgProvider, useOrg } from '../features/organizations/OrgContext';
 import type { Organization } from '../features/organizations/OrgContext';
 import { SuspendedTenant } from '../features/organizations/SuspendedTenant';
 import { BillingGraceAlert } from '../features/organizations/BillingGraceAlert';
+import { InvoiceNotificationsProvider } from '../features/organizations/InvoiceNotifications';
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -638,7 +639,9 @@ function LayoutContent() {
 export function UserLayout() {
   return (
     <OrgProvider>
-      <LayoutContent />
+      <InvoiceNotificationsProvider>
+        <LayoutContent />
+      </InvoiceNotificationsProvider>
     </OrgProvider>
   );
 }

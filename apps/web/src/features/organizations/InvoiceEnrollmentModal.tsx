@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Receipt, FileCheck, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
-import { useComprobanteComprador, extractEdgeFunctionError, showEmailStatusToast, fetchJustEmittedInvoice } from './PaymentDetailModal';
+import { useComprobanteComprador, extractEdgeFunctionError, showEmailStatusToast, fetchJustEmittedInvoice, InvoicingOverlay } from './PaymentDetailModal';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 import type { InvoiceDetailDocument } from './InvoiceDetailModal';
+import { useInvoiceNotifications } from './InvoiceNotifications';
 
 type PendingPayment = {
   id: string;
@@ -41,6 +42,10 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
   const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
   const [justEmittedInvoice, setJustEmittedInvoice] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
   const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
+  const { notifyInvoiceReady } = useInvoiceNotifications();
+  // Igual que en RegisterPaymentModal: true cuando el usuario eligió
+  // "seguir usando la app" mientras se facturaba.
+  const dismissedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +109,10 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
       }
       showEmailStatusToast((data as any)?.email_status);
       onSuccess();
+      if (dismissedRef.current) {
+        await notifyInvoiceReady(organizationId, (data as any).sri_document_id);
+        return;
+      }
       // Muestra la factura recién emitida al instante, en vez de que el
       // usuario tenga que ir a buscarla al módulo Facturas.
       const detail = await fetchJustEmittedInvoice((data as any).sri_document_id);
@@ -119,6 +128,21 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
       setSubmitting(false);
     }
   };
+
+  const handleContinueInBackground = () => {
+    dismissedRef.current = true;
+    onClose();
+  };
+
+  if (submitting && !dismissedRef.current) {
+    return (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg my-8 overflow-hidden animate-popIn">
+          <InvoicingOverlay onContinueInBackground={handleContinueInBackground} />
+        </div>
+      </div>
+    );
+  }
 
   if (justEmittedInvoice) {
     return (

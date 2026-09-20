@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { X, Receipt, Plus, Calendar, DollarSign, CreditCard, Download, Send, Loader2, FileCheck, RotateCcw, FileX, FileMinus, Mail, Ban } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -10,6 +10,7 @@ import type { ReceiptOrganization } from './ReceiptDocument';
 import { CreditNoteModal } from './CreditNoteModal';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 import type { InvoiceDetailDocument } from './InvoiceDetailModal';
+import { useInvoiceNotifications } from './InvoiceNotifications';
 
 export type Payment = {
   id: string;
@@ -205,6 +206,39 @@ export async function fetchJustEmittedInvoice(
   const concept = descriptions.length > 0 ? [...new Set(descriptions)].join(', ') : 'Servicio';
 
   return { invoice: data as InvoiceDetailDocument, concept };
+}
+
+// Reemplaza el formulario mientras se emite la factura — antes el modal
+// solo deshabilitaba los botones y mostraba un spinner adentro de uno de
+// ellos, obligando al usuario a quedarse mirando los 5-15s (a veces más,
+// si el servicio de facturación tuvo que despertar) que tarda firmar y
+// autorizar ante el SRI. El botón de abajo no cancela la emisión — ya está
+// en curso — solo cierra el modal y delega el aviso final a
+// InvoiceNotifications (notifyInvoiceReady), que sobrevive a que este
+// componente se desmonte.
+export function InvoicingOverlay({ onContinueInBackground }: { onContinueInBackground: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 py-10 px-4 text-center">
+      <div className="relative w-16 h-16 shrink-0">
+        <div className="absolute inset-0 rounded-full border-4 border-indigo-100" />
+        <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Receipt className="w-6 h-6 text-indigo-600" />
+        </div>
+      </div>
+      <div>
+        <p className="text-sm font-bold text-slate-900">Facturando tu comprobante...</p>
+        <p className="text-xs text-slate-500 mt-1">Puede tardar unos segundos mientras se firma y autoriza ante el SRI.</p>
+      </div>
+      <button
+        type="button"
+        onClick={onContinueInBackground}
+        className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer"
+      >
+        Puedes seguir usando la app — te avisamos cuando esté lista
+      </button>
+    </div>
+  );
 }
 
 export async function retryInvoice(organizationId: string, sriDocumentId: string): Promise<boolean> {
@@ -775,6 +809,12 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
   const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
   const [justEmittedInvoice, setJustEmittedInvoice] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
   const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
+  const { notifyInvoiceReady } = useInvoiceNotifications();
+  // true cuando el usuario eligió "seguir usando la app" mientras se
+  // facturaba — a partir de ahí el resultado se avisa vía
+  // notifyInvoiceReady en vez de con el estado local justEmittedInvoice,
+  // que ya no se vería (este componente se desmonta al cerrar el modal).
+  const dismissedRef = useRef(false);
 
   const validate = (): boolean => {
     if (!amount || Number(amount) <= 0) { toast.error('Ingresa un monto válido.'); return false; }
@@ -864,10 +904,17 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
           toast.error('El pago se guardó, pero el SRI rechazó la factura: ' + message, { duration: 7000 });
         }
         onSuccess();
-        onClose();
+        if (!dismissedRef.current) onClose();
       } else {
         showEmailStatusToast((data as any)?.email_status);
         onSuccess();
+        if (dismissedRef.current) {
+          // El usuario ya se fue a hacer otra cosa — este componente
+          // sigue "vivo" solo porque la función async no ha terminado,
+          // pero ya no hay modal visible donde mostrar el resultado.
+          await notifyInvoiceReady(charge.organization_id, (data as any).sri_document_id);
+          return;
+        }
         // Muestra la factura recién emitida al instante, en vez de que el
         // usuario tenga que ir a buscarla al módulo Facturas — si por lo
         // que sea no se puede traer el detalle, el toast es el respaldo.
@@ -884,7 +931,22 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
     }
   };
 
+  const handleContinueInBackground = () => {
+    dismissedRef.current = true;
+    onClose();
+  };
+
   const invoiceBlocked = Boolean(hasElectronicBilling) && !repLoading && !hasIdentification && !allowConsumidorFinal;
+
+  if (submittingAction === 'invoice' && !dismissedRef.current) {
+    return (
+      <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 w-full max-w-md">
+          <InvoicingOverlay onContinueInBackground={handleContinueInBackground} />
+        </div>
+      </div>
+    );
+  }
 
   if (justEmittedInvoice) {
     return (
