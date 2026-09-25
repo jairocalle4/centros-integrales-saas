@@ -14,6 +14,15 @@ Tras analizar el ERP existente del usuario (`ERP-STORE-FAST-ConFirmaElectronica`
 ## Restricciones
 Nunca exponer certificados `.p12`, contraseñas de la firma, ni el JWT/API key de estos servicios al cliente o en logs/prompts.
 
+## Infraestructura: los dos servicios corren en el plan gratuito de Render
+`services/electronic-billing` (RIDE) y la instancia dedicada de `open-api-facturacion-sri` (SRI
+API) se duermen tras ~15 min sin tráfico y pueden agotar el cupo mensual gratuito de Render si se
+mantienen despiertos sin cuidado (ya pasó una vez: los dos quedaron suspendidos por Render del 20
+de septiembre al 1 de octubre de 2026). Antes de diagnosticar un error de facturación que
+mencione HTTP 503/504 contra estos servicios, o de tocar el despertador que los mantiene activos,
+lee `RENDER_KEEPALIVE.md` — tiene el mecanismo exacto (pg_cron + pg_net), el incidente real y cómo
+replicarlo correctamente en un servicio nuevo sin repetir el error.
+
 ## Tipos de documento soportados
 - **Factura** (`document_type = '01'`): el flujo original, `handleEmit`/`handleRetry`.
 - **Nota de Crédito** (`document_type = '04'`): anula el 100% de una factura ya `AUTHORIZED` (sin soporte de montos parciales) — `handleEmitCreditNote`, endpoint externo `/sri/emitir/nota-credito` (`CreateNotaCreditoDto`/`NotaCreditoResponseDto`, verificado contra `${SRI_API_URL}/api-json` antes de implementar). `sri_documents.documento_modificado_id` vincula la nota a la factura que modifica; los triggers `prevent_void_charge_with_authorized_invoice`/`prevent_void_payment_with_authorized_invoice` solo desbloquean la anulación del cargo/pago original cuando existe una nota de crédito `AUTHORIZED` vinculada.
