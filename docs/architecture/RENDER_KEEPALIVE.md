@@ -25,11 +25,12 @@ suficiente para que Render nunca los vea inactivos.
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 
+-- Estado actual (desde la migración 3): solo pinga la SRI API — ver
+-- "Cómo evitar que se repita" más abajo para el porqué.
 SELECT cron.schedule(
   'render-keepalive-ping',
-  '<expresión cron>',
+  '*/10 0,12-23 * * *',
   $$
-    SELECT net.http_get(url := 'https://centros-integrales-ride.onrender.com/health', timeout_milliseconds := 30000);
     SELECT net.http_get(url := 'https://centros-integrales-sri-api.onrender.com/api-json', timeout_milliseconds := 30000);
   $$
 );
@@ -62,6 +63,10 @@ Migraciones reales de este mecanismo (orden cronológico):
    (cada 10 min, 24/7, los dos servicios).
 2. `supabase/migrations/20260920170000_render_keepalive_business_hours.sql` — la reemplaza por
    `*/10 12-22 * * *` (horas UTC 12-22 = 07:00-18:00 Ecuador) tras el incidente descrito abajo.
+3. `supabase/migrations/20260928120000_render_keepalive_sri_api_only.sql` — la reemplaza de nuevo:
+   quita el ping a RIDE por completo y deja solo la SRI API, en `*/10 0,12-23 * * *` (horas UTC
+   `0,12-23` = 07:00-20:00 Ecuador, 13h/día). Aplica el análisis de la sección siguiente — decisión
+   explícita del usuario tras confirmar que no quería pagar el plan Starter de Render.
 
 Verificar el estado real en cualquier momento (no asumir que sigue como dice este documento — los
 documentos se desactualizan, la base no):
@@ -100,14 +105,14 @@ se levanta antes de esa fecha salvo que se pase el servicio a un plan pago (el b
 compute plan" en el banner rojo de cada servicio) — no hay forma de acelerarlo desde código ni
 desde este proyecto.
 
-## Cómo evitar que se repita — análisis, no solo el parche
+## Cómo se decidió despertar solo la SRI API (versión 3)
 
 La versión 2 (horario de oficina, 07:00-18:00 Ecuador en los dos servicios) fue el arreglo rápido
-elegido explícitamente por el usuario mientras no hay clientes reales — reduce cada servicio de
+elegido explícitamente por el usuario mientras no hay clientes reales — reducía cada servicio de
 ~24h/día a ~11h/día, dejando el consumo combinado (~682h/mes) bajo las 750h con margen.
 
-Pero los dos servicios **no tienen la misma criticidad**, y vale la pena una estrategia más fina
-la próxima vez que se ajuste esto:
+Pero los dos servicios **no tienen la misma criticidad**, y el usuario pidió explícitamente afinar
+esto en vez de seguir despertando a los dos por igual:
 
 - **SRI API es un bloqueador duro**: si está dormida o inalcanzable, `handleEmit` nunca llega a
   autenticarse y la factura completa falla — no hay forma de recuperarla sin que el usuario
@@ -119,19 +124,23 @@ la próxima vez que se ajuste esto:
   cold-start normal en un solo intento.
 
 Esa asimetría implica que, si hay que priorizar presupuesto de horas, **SRI API merece más
-ventana activa que RIDE, no la misma**. De hecho, matemáticamente: mantener **un solo** servicio
-despierto 24/7 todo el mes consume ~720-744h (según el mes tenga 30 o 31 días) — por debajo de las
-750h con margen ajustado pero real, sin restringir ningún horario. Mantener los dos 24/7 es
-exactamente lo que ya falló. Si en el futuro se decide dar más prioridad a SRI API:
-- SRI API: ping 24/7 (o con una ventana muy amplia, ej. dejando solo 1-2h/día sin pings de
-  madrugada como margen de seguridad).
-- RIDE: sin keepalive, o con una ventana bastante más angosta (ej. solo horas pico) — sus
-  cold-starts ya son tolerables gracias al reintento existente.
+ventana activa que RIDE, no la misma**. Se le presentaron al usuario tres opciones concretas para
+el horario de la SRI API (ya sin RIDE en el cron):
+- 24/7 sin restricción — matemáticamente seguro con un solo servicio (~720-744h/mes, según el mes
+  tenga 30 o 31 días, por debajo de las 750h con margen ajustado pero real). Cero cold-starts en
+  cualquier hora, a costa de dejar menos margen si además crece el uso real de RIDE.
+- Horario de oficina 07:00-20:00 Ecuador (13h/día, ~403h/mes) — **la opción elegida**. Deja mucho
+  más margen que la anterior, a costa de que facturar de madrugada sí vería el cold-start original.
+- Una ventana de 1h/día (lo que el usuario había sugerido al inicio, sin darse cuenta de que cubría
+  muy poco del día real de operación) — descartada tras explicársela.
 
-No se aplicó este ajuste más fino todavía porque implica volver a tocar el cron después de que
-termine la suspensión actual (1 de octubre) — queda documentado aquí para que quien continúe este
-trabajo (humano o IA) lo evalúe con el usuario antes de aplicarlo, no lo decida solo (ver regla
-"Aprobación para Cambios Mayores" en `.claude/rules/00-mandatory-skills.md`).
+RIDE se quedó **sin keepalive propio** — sus cold-starts son tolerables gracias al reintento con
+backoff ya existente (`resilientFetch`) y al botón manual "Reintentar" si el PDF no se genera a
+tiempo (la factura ya quedó `AUTHORIZED` ante el SRI de todas formas).
+
+Aplicado en la migración 3 (`20260928120000_render_keepalive_sri_api_only.sql`) — con aprobación
+explícita del usuario sobre el horario exacto, como corresponde a un cambio de infraestructura
+(ver "Aprobación para Cambios Mayores" en `.claude/rules/00-mandatory-skills.md`).
 
 ## Receta para replicarlo en un servicio nuevo
 
