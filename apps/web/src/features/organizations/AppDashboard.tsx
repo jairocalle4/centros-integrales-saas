@@ -5,7 +5,6 @@ import { supabase } from '../../lib/supabase';
 import { formatDateWithWeekday } from '../../lib/formatDate';
 import { Skeleton, SkeletonCards } from '../../components/ui/Skeleton';
 import {
-  Users,
   CalendarCheck,
   DollarSign,
   Baby,
@@ -14,9 +13,8 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  UserPlus,
   PlusCircle,
-  ClipboardList,
+  Calendar,
 } from 'lucide-react';
 
 import { DashboardCalendar } from './DashboardCalendar';
@@ -40,6 +38,15 @@ type RecentCharge = {
   beneficiary_name: string;
 };
 
+type TodayItem = {
+  id: string;
+  time: string | null;
+  title: string;
+  subtitle?: string;
+  kind: 'appointment' | 'attendance';
+  status: string;
+};
+
 export function AppDashboard() {
   const { currentOrg, currentRole } = useOrg();
   // Profesional/Staff solo ven el calendario — nada de cifras de cobros
@@ -47,6 +54,7 @@ export function AppDashboard() {
   const isOwnerOrAdmin = currentRole === 'owner' || currentRole === 'admin';
   const [kpis, setKpis] = useState<KpiData | null>(null);
   const [recentCharges, setRecentCharges] = useState<RecentCharge[]>([]);
+  const [todayAgenda, setTodayAgenda] = useState<TodayItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -70,6 +78,8 @@ export function AppDashboard() {
         { data: chargesData },
         { count: nuevosMes },
         { data: paymentsData },
+        { data: attendanceTodayData },
+        { data: appointmentsTodayData },
       ] = await Promise.all([
         supabase
           .from('beneficiaries')
@@ -99,6 +109,18 @@ export function AppDashboard() {
           .select('amount')
           .eq('organization_id', currentOrg.id)
           .gte('payment_date', firstOfMonth),
+        // Reemplaza a "Acciones Rápidas" — sesiones/asistencia de hoy, sin
+        // importar el mes que esté navegando el calendario de al lado.
+        (supabase as any)
+          .from('attendance')
+          .select('id, status, scheduled_time, beneficiaries(first_name, last_name)')
+          .eq('organization_id', currentOrg.id)
+          .eq('session_date', today),
+        supabase
+          .from('appointments')
+          .select('id, patient_name, representative_name, time_slot, status, therapy_type')
+          .eq('organization_id', currentOrg.id)
+          .eq('appointment_date', today),
       ]);
 
       // Get beneficiary names for recent charges
@@ -149,6 +171,31 @@ export function AppDashboard() {
           beneficiary_name: benMap[c.beneficiary_id] || 'Sin beneficiario',
         }))
       );
+
+      // Agenda de hoy: sesiones/asistencia + citas de hoy, unificadas y
+      // ordenadas por hora (las que no tienen hora quedan al final).
+      const attendanceItems: TodayItem[] = (attendanceTodayData || []).map((a: any) => ({
+        id: `att-${a.id}`,
+        time: a.scheduled_time ? a.scheduled_time.substring(0, 5) : null,
+        title: a.beneficiaries ? `${a.beneficiaries.first_name} ${a.beneficiaries.last_name}` : 'Beneficiario',
+        kind: 'attendance',
+        status: a.status,
+      }));
+      const appointmentItems: TodayItem[] = (appointmentsTodayData || []).map((a: any) => ({
+        id: `apt-${a.id}`,
+        time: a.time_slot ? a.time_slot.substring(0, 5) : null,
+        title: a.patient_name,
+        subtitle: a.therapy_type || `Tutor: ${a.representative_name}`,
+        kind: 'appointment',
+        status: a.status,
+      }));
+      const agenda = [...appointmentItems, ...attendanceItems].sort((x, y) => {
+        if (x.time && y.time) return x.time.localeCompare(y.time);
+        if (x.time) return -1;
+        if (y.time) return 1;
+        return 0;
+      });
+      setTodayAgenda(agenda);
     } catch (err) {
       console.error('Error cargando datos del dashboard:', err);
     } finally {
@@ -167,6 +214,20 @@ export function AppDashboard() {
     if (status === 'partial') return 'Parcial';
     if (status === 'paid') return 'Pagado';
     return 'Anulado';
+  };
+
+  const agendaStatusStyle = (item: TodayItem) => {
+    if (item.kind === 'appointment') {
+      if (item.status === 'converted') return { label: 'Matriculado', color: 'bg-emerald-100 text-emerald-700' };
+      if (item.status === 'confirmed') return { label: 'Confirmada', color: 'bg-indigo-100 text-indigo-700' };
+      if (item.status === 'cancelled') return { label: 'Cancelada', color: 'bg-slate-100 text-slate-500' };
+      return { label: 'Cita agendada', color: 'bg-indigo-100 text-indigo-700' };
+    }
+    if (item.status === 'present') return { label: 'Presente', color: 'bg-emerald-100 text-emerald-700' };
+    if (item.status === 'late') return { label: 'Tardanza', color: 'bg-amber-100 text-amber-700' };
+    if (item.status === 'justified') return { label: 'Justificada', color: 'bg-indigo-100 text-indigo-700' };
+    if (item.status === 'absent') return { label: 'Ausente', color: 'bg-red-100 text-red-700' };
+    return { label: 'Sesión programada', color: 'bg-cyan-100 text-cyan-700' };
   };
 
   if (!currentOrg) return null;
@@ -245,14 +306,65 @@ export function AppDashboard() {
       )}
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* Left Column (2/3 width): Hero Interactive Calendar */}
-        <div className="lg:col-span-2 space-y-6 animate-fadeInUp" style={{ animationDelay: '220ms' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+        {/* Left Column (3/5 width): Hero Interactive Calendar */}
+        <div className="lg:col-span-3 space-y-6 animate-fadeInUp" style={{ animationDelay: '220ms' }}>
           <DashboardCalendar />
         </div>
 
-        {/* Right Column (1/3 width): Cobros Pendientes & Acciones Rápidas */}
-        <div className="lg:col-span-1 space-y-6">
+        {/* Right Column (2/5 width): Agenda de Hoy & Cobros Pendientes */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Agenda de Hoy Widget */}
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden animate-fadeInUp" style={{ animationDelay: '260ms' }}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+              <h2 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
+                <Calendar className="w-4 h-4 text-indigo-500" />
+                Agenda de Hoy
+              </h2>
+              <span className="text-xs text-slate-400">{formatDateWithWeekday(new Date())}</span>
+            </div>
+            {loading ? (
+              <div className="p-4 space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="space-y-1.5 flex-1">
+                      <Skeleton className="h-3 w-2/3" />
+                      <Skeleton className="h-2.5 w-1/3" />
+                    </div>
+                    <Skeleton className="h-3 w-10 ml-3" />
+                  </div>
+                ))}
+              </div>
+            ) : todayAgenda.length === 0 ? (
+              <div className="p-8 text-center text-slate-400">
+                <Calendar className="w-9 h-9 text-slate-300 mx-auto mb-2" />
+                <p className="text-xs font-semibold">Sin citas ni sesiones agendadas para hoy.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                {todayAgenda.map((item) => {
+                  const s = agendaStatusStyle(item);
+                  return (
+                    <div key={item.id} className="flex items-center justify-between px-4 py-3">
+                      <div className="min-w-0 pr-2">
+                        <p className="text-xs font-bold text-slate-900 truncate">{item.title}</p>
+                        {item.subtitle && <p className="text-[11px] text-slate-500 truncate">{item.subtitle}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {item.time && (
+                          <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {item.time}
+                          </span>
+                        )}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.color}`}>{s.label}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           {/* Cobros Pendientes Widget */}
           <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden animate-fadeInUp" style={{ animationDelay: '260ms' }}>
             <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
@@ -322,46 +434,6 @@ export function AppDashboard() {
             )}
           </div>
 
-          {/* Acciones Rápidas Widget */}
-          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-5 animate-fadeInUp" style={{ animationDelay: '300ms' }}>
-            <h2 className="font-bold text-slate-900 mb-3.5 flex items-center gap-2 text-sm">
-              <ClipboardList className="w-4 h-4 text-indigo-500" />
-              Acciones Rápidas
-            </h2>
-            <div className="space-y-2">
-              <QuickAction
-                icon={<CalendarCheck className="w-4 h-4" />}
-                label="Registrar Asistencia"
-                to="/app/asistencia"
-                color="indigo"
-              />
-              <QuickAction
-                icon={<Baby className="w-4 h-4" />}
-                label="Ver Beneficiarios"
-                to="/app/beneficiarios"
-                color="violet"
-              />
-              <QuickAction
-                icon={<DollarSign className="w-4 h-4" />}
-                label="Gestionar Cobros"
-                to="/app/cobros"
-                color="emerald"
-              />
-              <QuickAction
-                icon={<UserPlus className="w-4 h-4" />}
-                label="Invitar al Equipo"
-                to="/app/equipo"
-                color="amber"
-              />
-              <QuickAction
-                icon={<Users className="w-4 h-4" />}
-                label="Representantes"
-                to="/app/representantes"
-                color="slate"
-              />
-            </div>
-          </div>
-
           {/* Primeros Pasos si no hay beneficiarios */}
           {(kpis?.totalBeneficiarios === 0) && (
             <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 animate-fadeInUp" style={{ animationDelay: '340ms' }}>
@@ -422,36 +494,6 @@ function KpiCard({
         <p className="text-2xl font-bold text-slate-900 leading-tight">{value}</p>
         <p className="text-xs text-slate-400 mt-0.5">{subLabel}</p>
       </div>
-    </Link>
-  );
-}
-
-function QuickAction({
-  icon,
-  label,
-  to,
-  color,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  to: string;
-  color: 'indigo' | 'violet' | 'emerald' | 'amber' | 'slate';
-}) {
-  const colors = {
-    indigo: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
-    violet: 'bg-violet-50 text-violet-700 hover:bg-violet-100',
-    emerald: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-    amber: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
-    slate: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-  };
-  return (
-    <Link
-      to={to}
-      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${colors[color]}`}
-    >
-      {icon}
-      {label}
-      <ArrowRight className="w-3.5 h-3.5 ml-auto opacity-60" />
     </Link>
   );
 }
