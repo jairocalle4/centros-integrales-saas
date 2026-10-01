@@ -104,12 +104,12 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg my-8 overflow-hidden animate-popIn flex flex-col max-h-[85vh]">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
-          <div className="flex items-center gap-2">
-            <Receipt className="w-5 h-5 text-indigo-600" />
-            <div>
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Receipt className="w-5 h-5 text-indigo-600 shrink-0" />
+            <div className="min-w-0">
               <h3 className="text-lg font-bold text-slate-900">Facturar Inscripción</h3>
-              <p className="text-xs text-slate-500">{beneficiaryName}</p>
+              <p className="text-xs text-slate-500 truncate">{beneficiaryName}</p>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
@@ -174,7 +174,7 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
         </div>
 
         {payments.length > 0 && (
-          <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between shrink-0">
+          <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
             <div>
               <p className="text-xs text-slate-500">Total a facturar ({selectedIds.size} pago{selectedIds.size !== 1 ? 's' : ''})</p>
               <p className="text-xl font-bold text-slate-900">${total.toFixed(2)}</p>
@@ -183,7 +183,7 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
+                className="flex-1 sm:flex-none px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
               >
                 Cancelar
               </button>
@@ -192,7 +192,7 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
                 onClick={handleSubmit}
                 disabled={repLoading || selectedIds.size === 0 || invoiceBlocked}
                 title={invoiceBlocked ? 'Falta la cédula del comprador — activa "Facturar como Consumidor Final" para continuar' : undefined}
-                className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
               >
                 <Receipt className="w-4 h-4" />
                 Emitir Factura

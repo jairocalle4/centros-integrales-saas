@@ -477,19 +477,20 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
               <Receipt className="w-5 h-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="font-semibold text-slate-900">Detalle del Cobro</h3>
-              <p className="text-sm text-slate-500 flex items-center gap-2">
-                {charge.description} {statusBadge(charge.status)}
+              <p className="text-sm text-slate-500 flex items-center gap-2 min-w-0">
+                <span className="truncate">{charge.description}</span>
+                <span className="shrink-0">{statusBadge(charge.status)}</span>
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:bg-slate-100 hover:text-slate-600 p-2 rounded-xl transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:bg-slate-100 hover:text-slate-600 p-2 rounded-xl transition-colors shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -744,18 +745,18 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-          <p className="text-xs text-slate-500">
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p className="text-xs text-slate-500 truncate min-w-0">
             {charge.beneficiaries ? `Beneficiario: ${charge.beneficiaries.first_name} ${charge.beneficiaries.last_name}` : 'Cobro general'}
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 shrink-0">
             {remaining > 0 && charge.status !== 'void' && (
               <button
                 onClick={() => {
                   onClose();
                   onPayRemaining(charge);
                 }}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 shadow-sm transition-all cursor-pointer"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 shadow-sm transition-all cursor-pointer w-full sm:w-auto"
               >
                 <Plus className="w-4 h-4" />
                 Registrar Pago
