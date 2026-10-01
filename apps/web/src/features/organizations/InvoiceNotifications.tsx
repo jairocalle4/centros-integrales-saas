@@ -233,10 +233,14 @@ export function InvoiceNotificationsProvider({ children }: { children: ReactNode
         </div>
       )}
 
-      {/* 2. Pastilla flotante abajo a la derecha mientras sigue en curso */}
+      {/* 2. Pastilla flotante abajo a la derecha mientras sigue en curso —
+          left-4 right-4 (en vez de solo right-5 + w-full) para que en
+          pantallas angostas no se salga por la izquierda: w-full ahí
+          resuelve al 100% del viewport, y right-5 sin un left que lo
+          compense desplaza la caja fuera de la pantalla. */}
       {activeTask && !isProgressModalOpen && (
-        <div className="fixed bottom-5 right-5 z-[9990] max-w-sm w-full p-2 sm:p-0 animate-fadeInUp">
-          <div className="bg-slate-900/95 text-white backdrop-blur-md rounded-2xl p-3.5 shadow-2xl border border-indigo-500/40 flex items-center justify-between gap-3">
+        <div className="fixed bottom-5 left-4 right-4 sm:left-auto sm:right-5 z-[9990] flex justify-end animate-fadeInUp">
+          <div className="w-full max-w-sm bg-slate-900/95 text-white backdrop-blur-md rounded-2xl p-3.5 shadow-2xl border border-indigo-500/40 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <div className="relative flex items-center justify-center shrink-0">
                 <span className="absolute w-8 h-8 bg-indigo-500/30 rounded-full animate-ping" />
@@ -264,9 +268,9 @@ export function InvoiceNotificationsProvider({ children }: { children: ReactNode
 
       {/* 3. Resultado — mismo lugar donde estaba la pastilla de progreso */}
       {completedNotification && (
-        <div className="fixed bottom-5 right-5 z-[9999] max-w-sm w-full p-2 sm:p-0 animate-fadeInUp">
+        <div className="fixed bottom-5 left-4 right-4 sm:left-auto sm:right-5 z-[9999] flex justify-end animate-fadeInUp">
           {completedNotification.status === 'authorized' ? (
-            <div className="bg-white rounded-2xl p-4 shadow-2xl border border-emerald-300/80 flex items-start gap-3 relative overflow-hidden ring-4 ring-emerald-500/10">
+            <div className="w-full max-w-sm bg-white rounded-2xl p-4 shadow-2xl border border-emerald-300/80 flex items-start gap-3 relative overflow-hidden ring-4 ring-emerald-500/10">
               <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-emerald-500 to-teal-600" />
               <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 ml-1">
                 <CheckCircle2 size={20} />
@@ -299,7 +303,7 @@ export function InvoiceNotificationsProvider({ children }: { children: ReactNode
               </div>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl p-4 shadow-2xl border border-rose-300/80 flex items-start gap-3 relative overflow-hidden ring-4 ring-rose-500/10">
+            <div className="w-full max-w-sm bg-white rounded-2xl p-4 shadow-2xl border border-rose-300/80 flex items-start gap-3 relative overflow-hidden ring-4 ring-rose-500/10">
               <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-rose-600" />
               <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 ml-1">
                 <AlertCircle size={20} />
