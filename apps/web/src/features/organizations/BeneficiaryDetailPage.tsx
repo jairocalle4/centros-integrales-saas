@@ -1784,6 +1784,7 @@ export function BeneficiaryDetailPage() {
           payments={viewingCharge?.payments || []}
           onPayRemaining={(c) => setPaymentTarget(c)}
           onInvoiceChanged={loadAll}
+          hasElectronicBilling={canEmitInvoices}
           organization={currentOrg}
           beneficiaryId={beneficiary.id}
           beneficiaryName={`${beneficiary.first_name} ${beneficiary.last_name}`}

@@ -423,6 +423,7 @@ export function CobrosModule() {
           payments={selectedChargeDetails ? internalPayments.filter(p => p.charge_id === selectedChargeDetails.id) : []}
           onPayRemaining={openPaymentModal}
           onInvoiceChanged={loadData}
+          hasElectronicBilling={canEmitInvoices}
           organization={currentOrg}
           beneficiaryId={selectedChargeDetails?.beneficiary_id || ''}
           beneficiaryName={

@@ -359,9 +359,10 @@ type Props = {
   beneficiaryId: string;
   beneficiaryName: string;
   onInvoiceChanged?: () => void;
+  hasElectronicBilling?: boolean;
 };
 
-export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRemaining, organization, beneficiaryId, beneficiaryName, onInvoiceChanged }: Props) {
+export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRemaining, organization, beneficiaryId, beneficiaryName, onInvoiceChanged, hasElectronicBilling }: Props) {
   const navigate = useNavigate();
   const [representative, setRepresentative] = useState<PrimaryRepresentative | null>(null);
   const [loadingRep, setLoadingRep] = useState(false);
@@ -372,6 +373,59 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   const [voidingId, setVoidingId] = useState<string | null>(null);
   const [creditedDocumentIds, setCreditedDocumentIds] = useState<Set<string>>(new Set());
   const [creditNoteTarget, setCreditNoteTarget] = useState<{ sriDocumentId: string; claveAcceso: string; total: number } | null>(null);
+  // Facturar un pago histórico que nunca quedó vinculado a un
+  // sri_documents (sri_document_id null) — ej. un intento anterior que
+  // nunca llegó a confirmarse (timeout/gateway), caso real detectado:
+  // el pago queda guardado pero sin nada que "Reintentar" porque nunca
+  // se creó el comprobante. Antes de esto no existía forma de facturar
+  // un pago ya registrado desde este modal — solo al momento de crearlo
+  // (RegisterPaymentModal) o por lote desde "Facturar Inscripción".
+  const [invoicingPaymentId, setInvoicingPaymentId] = useState<string | null>(null);
+  const [justEmittedForExisting, setJustEmittedForExisting] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
+  const dismissedExistingInvoiceRef = useRef(false);
+  const { notifyInvoiceReady } = useInvoiceNotifications();
+
+  const handleInvoiceExistingPayment = async (payment: Payment) => {
+    setInvoicingPaymentId(payment.id);
+    dismissedExistingInvoiceRef.current = false;
+    try {
+      const { data, error } = await supabase.functions.invoke('electronic-billing', {
+        body: { organization_id: organization.id, internal_payment_ids: [payment.id] },
+      });
+      if (error || (data as any)?.error) {
+        const parsed = await parseEdgeFunctionErrorBody(data, error);
+        const message = parsed?.error || 'Error desconocido.';
+        if (!isConfirmedFunctionRejection(error)) {
+          toast.error(
+            'No se pudo confirmar si la factura se generó — el servidor tardó demasiado en responder. Revisa en un momento o inténtalo de nuevo.',
+            { duration: 9000 }
+          );
+        } else {
+          toast.error('No se pudo facturar este pago: ' + message, { duration: 7000 });
+        }
+      } else {
+        showEmailStatusToast((data as any)?.email_status);
+        onInvoiceChanged?.();
+        if (dismissedExistingInvoiceRef.current) {
+          await notifyInvoiceReady(organization.id, (data as any).sri_document_id);
+        } else {
+          const detail = await fetchJustEmittedInvoice((data as any).sri_document_id);
+          if (detail) {
+            setJustEmittedForExisting(detail);
+          } else {
+            toast.success('Factura electrónica autorizada por el SRI.', { duration: 4000 });
+          }
+        }
+      }
+    } finally {
+      setInvoicingPaymentId(null);
+    }
+  };
+
+  const handleContinueExistingInvoiceInBackground = () => {
+    dismissedExistingInvoiceRef.current = true;
+    onClose();
+  };
 
   const handleVoidPayment = async (payment: Payment) => {
     const confirmed = window.confirm(
@@ -458,6 +512,31 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   }, [isOpen, payments]);
 
   if (!isOpen || !charge) return null;
+
+  if (invoicingPaymentId) {
+    return (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+          <InvoicingOverlay onContinueInBackground={handleContinueExistingInvoiceInBackground} />
+        </div>
+      </div>
+    );
+  }
+
+  if (justEmittedForExisting) {
+    return (
+      <InvoiceDetailModal
+        isOpen
+        onClose={() => setJustEmittedForExisting(null)}
+        organizationId={organization.id}
+        invoice={justEmittedForExisting.invoice}
+        concept={justEmittedForExisting.concept}
+        hasAuthorizedCreditNote={false}
+        modifiedDocument={null}
+        onChanged={() => onInvoiceChanged?.()}
+      />
+    );
+  }
 
   const totalPaid = payments.filter(p => !p.voided_at).reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = Math.max(0, charge.amount - totalPaid);
@@ -590,6 +669,12 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                   // todavía una nota de crédito que la respalde — igual que el
                   // trigger de la base de datos (20260902110000).
                   const blockedByInvoiceWithoutCreditNote = Boolean(hasAuthorizedInvoice) && !hasAuthorizedCreditNote;
+                  // Nunca se intentó facturar este pago (sri_document_id
+                  // null) — ej. un "Guardar y Facturar" que se quedó a
+                  // medias por un timeout, sin que nada quedara creado
+                  // para poder "Reintentar". Antes no había forma de
+                  // facturarlo después desde aquí.
+                  const neverInvoiced = !payment.sri_document_id && !isVoided;
 
                   return (
                     <div key={payment.id} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-xl bg-white border shadow-sm transition-colors ${isVoided ? 'border-slate-100 opacity-60' : 'border-slate-100 hover:border-slate-200'}`}>
@@ -665,6 +750,15 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
                               className="text-slate-500 hover:text-amber-700 hover:bg-amber-50 p-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
                             >
                               {retryingId === payment.sri_document_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                            </button>
+                          )}
+                          {neverInvoiced && hasElectronicBilling && (
+                            <button
+                              onClick={() => handleInvoiceExistingPayment(payment)}
+                              title="Facturar este pago electrónicamente"
+                              className="text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Receipt className="w-4 h-4" />
                             </button>
                           )}
                           {blockedByInvoiceWithoutCreditNote && (
