@@ -437,7 +437,7 @@ async function handleEmit(
   // representative, or a generic "consumidor final" if there isn't one).
   const { data: org, error: orgError } = await supabaseClient
     .from('organizations')
-    .select('ruc, name, address, city')
+    .select('ruc, name, legal_name, address, city')
     .eq('id', organization_id)
     .maybeSingle();
   if (orgError) throw orgError;
@@ -494,7 +494,10 @@ async function handleEmit(
     fechaEmision: formatFechaEmisionSri(new Date()),
     emisor: {
       ruc: org.ruc,
-      razonSocial: org.name,
+      // Razón social legal (nombres y apellidos del titular si es persona
+      // natural) — distinta del nombre comercial. Respaldo a org.name para
+      // organizaciones que todavía no la llenaron en Configuración.
+      razonSocial: org.legal_name || org.name,
       nombreComercial: org.name,
       dirMatriz: mainAddress,
       dirEstablecimiento: mainAddress,
@@ -852,7 +855,7 @@ async function handleEmitCreditNote(
   // factura original.
   const { data: org, error: orgError } = await supabaseClient
     .from('organizations')
-    .select('ruc, name, address, city')
+    .select('ruc, name, legal_name, address, city')
     .eq('id', organization_id)
     .maybeSingle();
   if (orgError) throw orgError;
@@ -886,7 +889,10 @@ async function handleEmitCreditNote(
     fechaEmision: formatFechaEmisionSri(new Date()),
     emisor: {
       ruc: org.ruc,
-      razonSocial: org.name,
+      // Razón social legal (nombres y apellidos del titular si es persona
+      // natural) — distinta del nombre comercial. Respaldo a org.name para
+      // organizaciones que todavía no la llenaron en Configuración.
+      razonSocial: org.legal_name || org.name,
       nombreComercial: org.name,
       dirMatriz: mainAddress,
       dirEstablecimiento: mainAddress,
@@ -1253,7 +1259,7 @@ async function handleRetry(
       .eq('sri_document_id', sri_document_id);
     const { data: org } = await supabaseClient
       .from('organizations')
-      .select('ruc, name, address, city')
+      .select('ruc, name, legal_name, address, city')
       .eq('id', organization_id)
       .maybeSingle();
 
@@ -1517,7 +1523,7 @@ async function handleUploadCertificate(supabaseClient: ReturnType<typeof createC
 
   const { data: org, error: orgError } = await supabaseClient
     .from('organizations')
-    .select('ruc, name, address, city')
+    .select('ruc, name, legal_name, address, city')
     .eq('id', organization_id)
     .maybeSingle();
   if (orgError) throw orgError;
@@ -1546,7 +1552,7 @@ async function handleUploadCertificate(supabaseClient: ReturnType<typeof createC
   // del emisor — la distinción Negocio Popular vs Emprendedor solo importa
   // para la leyenda de cada factura, no para el registro del emisor.
   const emisorUpdatableFields = {
-    razonSocial: org.name,
+    razonSocial: org.legal_name || org.name,
     nombreComercial: org.name,
     direccionMatriz: mainAddress,
     obligadoContabilidad: false,

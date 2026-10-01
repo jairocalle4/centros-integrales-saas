@@ -6,6 +6,11 @@ import { useAuth } from '../auth/AuthProvider';
 export type Organization = {
   id: string;
   name: string;
+  // Razón social legal del titular del RUC (nombres y apellidos si es
+  // persona natural) — distinta del nombre comercial (name). Puede estar
+  // vacía en organizaciones creadas antes de este campo; el emisor de la
+  // factura electrónica usa name como respaldo en ese caso.
+  legal_name?: string | null;
   ruc?: string | null;
   phone?: string | null;
   address?: string | null;

@@ -79,6 +79,7 @@ export function ConfiguracionModule() {
   };
 
   const [name, setName] = useState('');
+  const [legalName, setLegalName] = useState('');
   const [ruc, setRuc] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -89,6 +90,7 @@ export function ConfiguracionModule() {
   useEffect(() => {
     if (currentOrg) {
       setName(currentOrg.name || '');
+      setLegalName(currentOrg.legal_name || '');
       setRuc(currentOrg.ruc || '');
       setPhone(currentOrg.phone || '');
       setAddress(currentOrg.address || '');
@@ -107,6 +109,7 @@ export function ConfiguracionModule() {
         .from('organizations')
         .update({
           name: name.trim(),
+          legal_name: legalName.trim() || null,
           ruc: ruc.trim() || null,
           phone: phone.trim() || null,
           address: address.trim() || null,
@@ -255,6 +258,31 @@ export function ConfiguracionModule() {
                     className="w-full pl-11 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
+              </div>
+
+              {/* Razón Social — legal, distinta del nombre comercial de
+                  arriba. Para persona natural son los nombres y apellidos
+                  tal como está registrado en el RUC; el SRI autoriza el
+                  comprobante aunque este campo quede vacío o no coincida
+                  (no lo valida en tiempo real contra el registro), pero el
+                  RIDE queda legalmente incorrecto sin esto. */}
+              <div className="sm:col-span-2 xl:col-span-3">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Razón Social (para la factura electrónica)
+                </label>
+                <div className="relative">
+                  <UserIcon className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
+                  <input
+                    type="text"
+                    value={legalName}
+                    onChange={(e) => setLegalName(e.target.value)}
+                    placeholder="Ej. Pérez González María Fernanda (nombres y apellidos del titular del RUC)"
+                    className="w-full pl-11 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm font-semibold focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-1.5">
+                  Si el centro es de una persona natural, va el nombre completo del titular del RUC — no el nombre comercial de arriba. Si se deja vacío, la factura usa el Nombre Oficial del Centro.
+                </p>
               </div>
 
               {/* RUC */}
