@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { X, Receipt, Plus, Calendar, DollarSign, CreditCard, Download, Send, Loader2, FileCheck, RotateCcw, FileX, FileMinus, Mail, Ban } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -8,7 +8,6 @@ import { toWhatsAppNumber } from '../../lib/phone';
 import { downloadReceiptPdf, uploadReceiptAndGetSignedUrl } from './ReceiptDocument';
 import type { ReceiptOrganization } from './ReceiptDocument';
 import { CreditNoteModal } from './CreditNoteModal';
-import { InvoiceDetailModal } from './InvoiceDetailModal';
 import type { InvoiceDetailDocument } from './InvoiceDetailModal';
 import { useInvoiceNotifications } from './InvoiceNotifications';
 
@@ -208,39 +207,6 @@ export async function fetchJustEmittedInvoice(
   return { invoice: data as InvoiceDetailDocument, concept };
 }
 
-// Reemplaza el formulario mientras se emite la factura — antes el modal
-// solo deshabilitaba los botones y mostraba un spinner adentro de uno de
-// ellos, obligando al usuario a quedarse mirando los 5-15s (a veces más,
-// si el servicio de facturación tuvo que despertar) que tarda firmar y
-// autorizar ante el SRI. El botón de abajo no cancela la emisión — ya está
-// en curso — solo cierra el modal y delega el aviso final a
-// InvoiceNotifications (notifyInvoiceReady), que sobrevive a que este
-// componente se desmonte.
-export function InvoicingOverlay({ onContinueInBackground }: { onContinueInBackground: () => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-4 py-10 px-4 text-center">
-      <div className="relative w-16 h-16 shrink-0">
-        <div className="absolute inset-0 rounded-full border-4 border-indigo-100" />
-        <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Receipt className="w-6 h-6 text-indigo-600" />
-        </div>
-      </div>
-      <div>
-        <p className="text-sm font-bold text-slate-900">Facturando tu comprobante...</p>
-        <p className="text-xs text-slate-500 mt-1">Puede tardar unos segundos mientras se firma y autoriza ante el SRI.</p>
-      </div>
-      <button
-        type="button"
-        onClick={onContinueInBackground}
-        className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline cursor-pointer"
-      >
-        Puedes seguir usando la app — te avisamos cuando esté lista
-      </button>
-    </div>
-  );
-}
-
 export async function retryInvoice(organizationId: string, sriDocumentId: string): Promise<boolean> {
   const { data, error } = await supabase.functions.invoke('electronic-billing', {
     body: { action: 'retry', organization_id: organizationId, sri_document_id: sriDocumentId },
@@ -379,52 +345,20 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   // el pago queda guardado pero sin nada que "Reintentar" porque nunca
   // se creó el comprobante. Antes de esto no existía forma de facturar
   // un pago ya registrado desde este modal — solo al momento de crearlo
-  // (RegisterPaymentModal) o por lote desde "Facturar Inscripción".
-  const [invoicingPaymentId, setInvoicingPaymentId] = useState<string | null>(null);
-  const [justEmittedForExisting, setJustEmittedForExisting] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
-  const dismissedExistingInvoiceRef = useRef(false);
-  const { notifyInvoiceReady } = useInvoiceNotifications();
+  // (RegisterPaymentModal) o por lote desde "Facturar Inscripción". La
+  // emisión en sí la maneja el provider global (InvoiceNotifications);
+  // este modal solo la dispara y se cierra.
+  const { startInvoicingTask } = useInvoiceNotifications();
 
-  const handleInvoiceExistingPayment = async (payment: Payment) => {
-    setInvoicingPaymentId(payment.id);
-    dismissedExistingInvoiceRef.current = false;
-    try {
-      const { data, error } = await supabase.functions.invoke('electronic-billing', {
-        body: { organization_id: organization.id, internal_payment_ids: [payment.id] },
-      });
-      if (error || (data as any)?.error) {
-        const parsed = await parseEdgeFunctionErrorBody(data, error);
-        const message = parsed?.error || 'Error desconocido.';
-        if (!isConfirmedFunctionRejection(error)) {
-          toast.error(
-            'No se pudo confirmar si la factura se generó — el servidor tardó demasiado en responder. Revisa en un momento o inténtalo de nuevo.',
-            { duration: 9000 }
-          );
-        } else {
-          toast.error('No se pudo facturar este pago: ' + message, { duration: 7000 });
-        }
-      } else {
-        showEmailStatusToast((data as any)?.email_status);
-        onInvoiceChanged?.();
-        if (dismissedExistingInvoiceRef.current) {
-          await notifyInvoiceReady(organization.id, (data as any).sri_document_id);
-        } else {
-          const detail = await fetchJustEmittedInvoice((data as any).sri_document_id);
-          if (detail) {
-            setJustEmittedForExisting(detail);
-          } else {
-            toast.success('Factura electrónica autorizada por el SRI.', { duration: 4000 });
-          }
-        }
-      }
-    } finally {
-      setInvoicingPaymentId(null);
-    }
-  };
-
-  const handleContinueExistingInvoiceInBackground = () => {
-    dismissedExistingInvoiceRef.current = true;
+  const handleInvoiceExistingPayment = (payment: Payment) => {
     onClose();
+    startInvoicingTask({
+      organizationId: organization.id,
+      paymentIds: [payment.id],
+      description: beneficiaryName,
+      amount: Number(payment.amount),
+      onSettled: onInvoiceChanged,
+    });
   };
 
   const handleVoidPayment = async (payment: Payment) => {
@@ -512,31 +446,6 @@ export function PaymentDetailModal({ isOpen, onClose, charge, payments, onPayRem
   }, [isOpen, payments]);
 
   if (!isOpen || !charge) return null;
-
-  if (invoicingPaymentId) {
-    return (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-          <InvoicingOverlay onContinueInBackground={handleContinueExistingInvoiceInBackground} />
-        </div>
-      </div>
-    );
-  }
-
-  if (justEmittedForExisting) {
-    return (
-      <InvoiceDetailModal
-        isOpen
-        onClose={() => setJustEmittedForExisting(null)}
-        organizationId={organization.id}
-        invoice={justEmittedForExisting.invoice}
-        concept={justEmittedForExisting.concept}
-        hasAuthorizedCreditNote={false}
-        modifiedDocument={null}
-        onChanged={() => onInvoiceChanged?.()}
-      />
-    );
-  }
 
   const totalPaid = payments.filter(p => !p.voided_at).reduce((sum, p) => sum + Number(p.amount), 0);
   const remaining = Math.max(0, charge.amount - totalPaid);
@@ -901,14 +810,8 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
   const [reference, setReference] = useState('');
   const [submittingAction, setSubmittingAction] = useState<'save' | 'invoice' | null>(null);
   const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
-  const [justEmittedInvoice, setJustEmittedInvoice] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
   const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
-  const { notifyInvoiceReady } = useInvoiceNotifications();
-  // true cuando el usuario eligió "seguir usando la app" mientras se
-  // facturaba — a partir de ahí el resultado se avisa vía
-  // notifyInvoiceReady en vez de con el estado local justEmittedInvoice,
-  // que ya no se vería (este componente se desmonta al cerrar el modal).
-  const dismissedRef = useRef(false);
+  const { startInvoicingTask } = useInvoiceNotifications();
 
   const validate = (): boolean => {
     if (!amount || Number(amount) <= 0) { toast.error('Ingresa un monto válido.'); return false; }
@@ -954,108 +857,37 @@ export function RegisterPaymentModal({ charge, paidSoFar, onClose, onSuccess, ha
     }
   };
 
+  // "Guardar y Facturar" solo inserta el pago aquí mismo — la emisión en
+  // sí corre en el provider global (InvoiceNotifications), que se encarga
+  // de la animación, de dejar seguir usando la app, y del resultado. Este
+  // modal se cierra de inmediato; no necesita esperar nada más.
   const handleSaveAndInvoice = async () => {
     if (!validate()) return;
     setSubmittingAction('invoice');
-    try {
-      const paymentId = await insertPayment();
-      if (!paymentId) return;
+    const paymentId = await insertPayment();
+    setSubmittingAction(null);
+    if (!paymentId) return;
 
-      const { data, error } = await supabase.functions.invoke('electronic-billing', {
-        body: {
-          organization_id: charge.organization_id,
-          internal_payment_ids: [paymentId],
-          allow_consumidor_final: allowConsumidorFinal,
-        },
-      });
-
-      if (error || (data as any)?.error) {
-        const parsed = await parseEdgeFunctionErrorBody(data, error);
-        const message = parsed?.error || 'Error desconocido.';
-        if (!isConfirmedFunctionRejection(error)) {
-          // Inconcluso — timeout de gateway (504), error de red, o
-          // cualquier respuesta sin un status 4xx confirmado de NUESTRA
-          // función: no sabemos si la factura se llegó a generar. Este es
-          // exactamente el incidente real que motivó este chequeo: la
-          // Edge Function tardó demasiado generando el RIDE, el navegador
-          // recibió un 504, pero la factura SÍ quedó autorizada por el
-          // SRI y el pago SÍ siguió vinculado. Nunca se borra el pago
-          // recién guardado ante esta incertidumbre.
-          toast.error(
-            'No se pudo confirmar si la factura se generó — el servidor tardó demasiado en responder. Tu pago SÍ se guardó; revisa el módulo Facturas en un momento, o usa "Reintentar" ahí si la factura queda pendiente de RIDE.',
-            { duration: 9000 }
-          );
-        } else if (!parsed?.sri_document_id) {
-          // Nuestra función respondió y confirmó que el intento nunca
-          // llegó a registrarse (ni siquiera rechazado por el SRI) —
-          // "Guardar y Facturar" es todo o nada: se revierte el pago
-          // recién insertado en vez de dejarlo huérfano sin factura.
-          await supabase.from('internal_payments').delete().eq('id', paymentId);
-          toast.error('No se pudo facturar — el pago NO se guardó: ' + message, { duration: 7000 });
-        } else {
-          // El SRI sí respondió (lo rechazó) y ya quedó registrado y
-          // vinculado — el pago se conserva para poder reintentar.
-          toast.error('El pago se guardó, pero el SRI rechazó la factura: ' + message, { duration: 7000 });
-        }
-        onSuccess();
-        if (!dismissedRef.current) onClose();
-      } else {
-        showEmailStatusToast((data as any)?.email_status);
-        onSuccess();
-        if (dismissedRef.current) {
-          // El usuario ya se fue a hacer otra cosa — este componente
-          // sigue "vivo" solo porque la función async no ha terminado,
-          // pero ya no hay modal visible donde mostrar el resultado.
-          await notifyInvoiceReady(charge.organization_id, (data as any).sri_document_id);
-          return;
-        }
-        // Muestra la factura recién emitida al instante, en vez de que el
-        // usuario tenga que ir a buscarla al módulo Facturas — si por lo
-        // que sea no se puede traer el detalle, el toast es el respaldo.
-        const detail = await fetchJustEmittedInvoice((data as any).sri_document_id);
-        if (detail) {
-          setJustEmittedInvoice(detail);
-        } else {
-          toast.success('Pago guardado y factura electrónica autorizada por el SRI.', { duration: 4000 });
-          onClose();
-        }
-      }
-    } finally {
-      setSubmittingAction(null);
-    }
-  };
-
-  const handleContinueInBackground = () => {
-    dismissedRef.current = true;
     onClose();
+    startInvoicingTask({
+      organizationId: charge.organization_id,
+      paymentIds: [paymentId],
+      allowConsumidorFinal,
+      description: charge.description,
+      amount: Number(amount),
+      onSettled: onSuccess,
+      // "Guardar y Facturar" es todo o nada: si el SRI confirma el
+      // rechazo sin siquiera registrar el intento, se revierte el pago
+      // recién insertado en vez de dejarlo huérfano sin factura. Un pago
+      // que ya existía de antes (facturar desde el historial) nunca pasa
+      // por aquí — ver handleInvoiceExistingPayment más abajo.
+      onConfirmedRejectionWithoutDocument: async () => {
+        await supabase.from('internal_payments').delete().eq('id', paymentId);
+      },
+    });
   };
 
   const invoiceBlocked = Boolean(hasElectronicBilling) && !repLoading && !hasIdentification && !allowConsumidorFinal;
-
-  if (submittingAction === 'invoice' && !dismissedRef.current) {
-    return (
-      <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 w-full max-w-md">
-          <InvoicingOverlay onContinueInBackground={handleContinueInBackground} />
-        </div>
-      </div>
-    );
-  }
-
-  if (justEmittedInvoice) {
-    return (
-      <InvoiceDetailModal
-        isOpen
-        onClose={onClose}
-        organizationId={charge.organization_id}
-        invoice={justEmittedInvoice.invoice}
-        concept={justEmittedInvoice.concept}
-        hasAuthorizedCreditNote={false}
-        modifiedDocument={null}
-        onChanged={onSuccess}
-      />
-    );
-  }
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">

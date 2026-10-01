@@ -1,11 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { X, Receipt, FileCheck, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Receipt, FileCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { formatDate } from '../../lib/formatDate';
-import { useComprobanteComprador, extractEdgeFunctionError, showEmailStatusToast, fetchJustEmittedInvoice, InvoicingOverlay } from './PaymentDetailModal';
-import { InvoiceDetailModal } from './InvoiceDetailModal';
-import type { InvoiceDetailDocument } from './InvoiceDetailModal';
+import { useComprobanteComprador } from './PaymentDetailModal';
 import { useInvoiceNotifications } from './InvoiceNotifications';
 
 type PendingPayment = {
@@ -38,14 +36,9 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
   const [payments, setPayments] = useState<PendingPayment[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [allowConsumidorFinal, setAllowConsumidorFinal] = useState(false);
-  const [justEmittedInvoice, setJustEmittedInvoice] = useState<{ invoice: InvoiceDetailDocument; concept: string } | null>(null);
   const { loading: repLoading, hasIdentification } = useComprobanteComprador(beneficiaryId);
-  const { notifyInvoiceReady } = useInvoiceNotifications();
-  // Igual que en RegisterPaymentModal: true cuando el usuario eligió
-  // "seguir usando la app" mientras se facturaba.
-  const dismissedRef = useRef(false);
+  const { startInvoicingTask } = useInvoiceNotifications();
 
   useEffect(() => {
     let cancelled = false;
@@ -93,71 +86,20 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
 
   const invoiceBlocked = !repLoading && !hasIdentification && !allowConsumidorFinal;
 
-  const handleSubmit = async () => {
+  // La emisión en sí corre en el provider global (InvoiceNotifications) —
+  // este modal solo la dispara con los pagos seleccionados y se cierra.
+  const handleSubmit = () => {
     if (selectedIds.size === 0) return;
-    setSubmitting(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('electronic-billing', {
-        body: {
-          organization_id: organizationId,
-          internal_payment_ids: Array.from(selectedIds),
-          allow_consumidor_final: allowConsumidorFinal,
-        },
-      });
-      if (error || (data as any)?.error) {
-        throw new Error(await extractEdgeFunctionError(data, error));
-      }
-      showEmailStatusToast((data as any)?.email_status);
-      onSuccess();
-      if (dismissedRef.current) {
-        await notifyInvoiceReady(organizationId, (data as any).sri_document_id);
-        return;
-      }
-      // Muestra la factura recién emitida al instante, en vez de que el
-      // usuario tenga que ir a buscarla al módulo Facturas.
-      const detail = await fetchJustEmittedInvoice((data as any).sri_document_id);
-      if (detail) {
-        setJustEmittedInvoice(detail);
-      } else {
-        toast.success(`Factura electrónica por $${total.toFixed(2)} autorizada por el SRI.`, { duration: 4000 });
-        onClose();
-      }
-    } catch (err: any) {
-      toast.error('Error al facturar: ' + err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleContinueInBackground = () => {
-    dismissedRef.current = true;
     onClose();
+    startInvoicingTask({
+      organizationId,
+      paymentIds: Array.from(selectedIds),
+      allowConsumidorFinal,
+      description: beneficiaryName,
+      amount: total,
+      onSettled: onSuccess,
+    });
   };
-
-  if (submitting && !dismissedRef.current) {
-    return (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg my-8 overflow-hidden animate-popIn">
-          <InvoicingOverlay onContinueInBackground={handleContinueInBackground} />
-        </div>
-      </div>
-    );
-  }
-
-  if (justEmittedInvoice) {
-    return (
-      <InvoiceDetailModal
-        isOpen
-        onClose={onClose}
-        organizationId={organizationId}
-        invoice={justEmittedInvoice.invoice}
-        concept={justEmittedInvoice.concept}
-        hasAuthorizedCreditNote={false}
-        modifiedDocument={null}
-        onChanged={onSuccess}
-      />
-    );
-  }
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-fadeIn">
@@ -241,20 +183,19 @@ export function InvoiceEnrollmentModal({ enrollmentId, organizationId, beneficia
               <button
                 type="button"
                 onClick={onClose}
-                disabled={submitting}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors disabled:opacity-50"
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || repLoading || selectedIds.size === 0 || invoiceBlocked}
+                disabled={repLoading || selectedIds.size === 0 || invoiceBlocked}
                 title={invoiceBlocked ? 'Falta la cédula del comprador — activa "Facturar como Consumidor Final" para continuar' : undefined}
                 className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
               >
-                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Receipt className="w-4 h-4" />}
-                {submitting ? 'Facturando...' : 'Emitir Factura'}
+                <Receipt className="w-4 h-4" />
+                Emitir Factura
               </button>
             </div>
           </div>
