@@ -320,7 +320,11 @@ export function InvoiceNotificationsProvider({ children }: { children: ReactNode
                     <X size={15} />
                   </button>
                 </div>
-                <p className="text-[11px] text-rose-700 mt-1 line-clamp-2">{completedNotification.errorMessage}</p>
+                {/* Sin line-clamp a propósito — un mensaje de rechazo del
+                    SRI puede traer la clave de acceso exacta (49 dígitos),
+                    justo el dato que hace falta para investigar un
+                    rechazo tipo "ya registrada"; cortarlo lo esconde. */}
+                <p className="text-[11px] text-rose-700 mt-1 break-words">{completedNotification.errorMessage}</p>
                 <p className="text-[11px] text-slate-500 truncate mt-0.5">{completedNotification.description}</p>
                 <div className="mt-2.5 flex items-center gap-2">
                   {completedNotification.sriDocumentId ? (
