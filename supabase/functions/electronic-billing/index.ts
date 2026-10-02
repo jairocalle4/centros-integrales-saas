@@ -542,8 +542,57 @@ async function handleEmit(
   }
 
   if (!ok || !emitResult.success) {
-    const errMsg = extractSriApiErrorMessage(emitResult);
-    return jsonResponse({ error: errMsg }, 400);
+    // Autoreparación ante "CLAVE ACCESO REGISTRADA" y rechazos similares:
+    // claveAcceso es un campo OBLIGATORIO de FacturaResponseDto
+    // (confirmado contra /api-json del servicio, no asumido) — siempre
+    // viene, incluso cuando success es false. Ese rechazo específico
+    // significa que el SRI ya tiene este comprobante archivado —
+    // típicamente de un intento anterior que sí llegó a autorizarse en
+    // SRI pero cuya respuesta nunca nos llegó por una falla de red de
+    // este lado. En vez de darlo por perdido (y dejar al usuario
+    // reintentando a ciegas contra el mismo secuencial atascado, sin
+    // nada que poder generar porque nunca se persistió nada), se
+    // consulta esa misma clave — si el SRI la tiene autorizada de
+    // verdad, se recupera el intento completo reutilizando el camino de
+    // abajo (ya probado) en vez de duplicar su lógica.
+    const claveAcceso: string | undefined = emitResult?.claveAcceso;
+    let consulta: { numAutorizacion?: string; fechaAutorizacion?: string } | null = null;
+    if (claveAcceso) {
+      try {
+        const { ok: consultaOk, data } = await sriApiFetch(`/sri/comprobantes/${claveAcceso}`);
+        if (consultaOk) consulta = data;
+      } catch (consultaError: any) {
+        console.error('No se pudo consultar la clave de acceso tras un rechazo:', consultaError?.message ?? consultaError);
+      }
+    }
+
+    if (consulta?.numAutorizacion) {
+      // Sí estaba autorizado — se continúa como si la emisión hubiera
+      // funcionado, con los datos reales de SRI.
+      emitResult = {
+        success: true,
+        claveAcceso,
+        estado: 'AUTORIZADO',
+        numeroAutorizacion: consulta.numAutorizacion,
+        fechaAutorizacion: consulta.fechaAutorizacion ?? null,
+        xmlAutorizado: null,
+      };
+      ok = true;
+    } else if (claveAcceso) {
+      // Genuinamente rechazado, o no se pudo confirmar — se persiste de
+      // todas formas con la clave real, para que quede algo que
+      // "Reintentar" en vez de desaparecer sin dejar rastro (el próximo
+      // intento, si vuelve a generar la misma clave atascada, al menos
+      // ya tiene un comprobante existente contra el cual reintentar en
+      // lugar de chocar otra vez a ciegas con un pago nuevo).
+      emitResult = { success: true, claveAcceso, estado: 'RECHAZADO', mensajes: [extractSriApiErrorMessage(emitResult)] };
+      ok = true;
+    } else {
+      // Nunca llegó a tener clave de acceso (p. ej. un error de
+      // validación antes de llegar al SRI) — no hay nada que persistir,
+      // el comportamiento "todo o nada" original sigue aplicando igual.
+      return jsonResponse({ error: extractSriApiErrorMessage(emitResult) }, 400);
+    }
   }
 
   const documentId = crypto.randomUUID();
@@ -936,8 +985,36 @@ async function handleEmitCreditNote(
   }
 
   if (!ok || !creditNoteResult.success) {
-    const errMsg = extractSriApiErrorMessage(creditNoteResult);
-    return jsonResponse({ error: errMsg }, 400);
+    // Misma autoreparación que en handleEmit — ver el comentario largo
+    // ahí para el razonamiento completo. claveAcceso también es
+    // obligatorio en NotaCreditoResponseDto (confirmado contra /api-json).
+    const claveAcceso: string | undefined = creditNoteResult?.claveAcceso;
+    let consulta: { numAutorizacion?: string; fechaAutorizacion?: string } | null = null;
+    if (claveAcceso) {
+      try {
+        const { ok: consultaOk, data } = await sriApiFetch(`/sri/comprobantes/${claveAcceso}`);
+        if (consultaOk) consulta = data;
+      } catch (consultaError: any) {
+        console.error('No se pudo consultar la clave de acceso tras un rechazo:', consultaError?.message ?? consultaError);
+      }
+    }
+
+    if (consulta?.numAutorizacion) {
+      creditNoteResult = {
+        success: true,
+        claveAcceso,
+        estado: 'AUTORIZADO',
+        numeroAutorizacion: consulta.numAutorizacion,
+        fechaAutorizacion: consulta.fechaAutorizacion ?? null,
+        xmlAutorizado: null,
+      };
+      ok = true;
+    } else if (claveAcceso) {
+      creditNoteResult = { success: true, claveAcceso, estado: 'RECHAZADO', mensajes: [extractSriApiErrorMessage(creditNoteResult)] };
+      ok = true;
+    } else {
+      return jsonResponse({ error: extractSriApiErrorMessage(creditNoteResult) }, 400);
+    }
   }
 
   const documentId = crypto.randomUUID();
