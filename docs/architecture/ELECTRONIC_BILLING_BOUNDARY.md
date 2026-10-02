@@ -14,6 +14,27 @@ Tras analizar el ERP existente del usuario (`ERP-STORE-FAST-ConFirmaElectronica`
 ## Restricciones
 Nunca exponer certificados `.p12`, contraseñas de la firma, ni el JWT/API key de estos servicios al cliente o en logs/prompts.
 
+## Autoreparación ante "clave de acceso ya registrada"
+
+`claveAcceso` es un campo **obligatorio** de `FacturaResponseDto` y
+`NotaCreditoResponseDto` (confirmado contra `/api-json` de la SRI API, no
+supuesto) — siempre viene, incluso cuando `success` es `false`. Un
+rechazo tipo "CLAVE ACCESO REGISTRADA" significa que el SRI ya tiene esa
+clave archivada, típicamente porque un intento anterior sí se autorizó
+en SRI pero su respuesta nunca llegó a esta Edge Function (falla de red
+de este lado) — el secuencial que generó esa clave vive enteramente en
+la SRI API externa, fuera de este repositorio, así que no se puede
+arreglar su causa de raíz desde aquí.
+
+`handleEmit` y `handleEmitCreditNote` ya no se rinden ante
+`success: false` sin más: si viene una `claveAcceso`, consultan esa
+misma clave (`GET /sri/comprobantes/:claveAcceso`) antes de fallar — si
+el SRI la tiene autorizada de verdad, el intento se recupera solo
+(reutilizando el camino de éxito existente); si de verdad está
+rechazada, igual se persiste con la clave real para que "Reintentar"
+exista, en vez de desaparecer sin rastro y volver a chocar a ciegas con
+el mismo secuencial atascado en el siguiente intento.
+
 ## Infraestructura: los dos servicios corren en el plan gratuito de Render
 `services/electronic-billing` (RIDE) y la instancia dedicada de `open-api-facturacion-sri` (SRI
 API) se duermen tras ~15 min sin tráfico y pueden agotar el cupo mensual gratuito de Render si se
