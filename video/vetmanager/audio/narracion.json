@@ -1,0 +1,12 @@
+[
+  { "id": "01-gancho", "text": "¿Tu veterinaria o peluquería canina todavía vive entre cuadernos y Excel? ¿Y sabes cuánto ganas de verdad cada mes?" },
+  { "id": "02-organiza", "text": "Vet Manager organiza toda tu clínica en un solo lugar." },
+  { "id": "03-historia", "text": "Cada mascota tiene su ficha e historia clínica: consultas, peso, diagnóstico y vacunas." },
+  { "id": "04-vacunas", "text": "Sabes qué vacuna toca, y se la recuerdas al dueño por WhatsApp." },
+  { "id": "05-bano", "text": "Y cuando el baño termina, el dueño recibe un WhatsApp automático para retirar a su mascota." },
+  { "id": "06-pos", "text": "Vendes con lector de código de barras y facturas al ese, erre, í, seas RIMPE o Régimen General: el IVA se calcula solo." },
+  { "id": "07-inventario", "text": "Cada venta descuenta tu inventario, y te avisa del stock bajo y de lo que está por caducar." },
+  { "id": "08-caja", "text": "Cuadras tu caja y registras tus gastos." },
+  { "id": "09-reportes", "text": "Y en reportes ves tus ingresos, tu margen y tu utilidad real, desde la compu o el celular." },
+  { "id": "10-cierre", "text": "Vet Manager: tu clínica en orden, y más tiempo para tus pacientes. Pide tu demostración." }
+]

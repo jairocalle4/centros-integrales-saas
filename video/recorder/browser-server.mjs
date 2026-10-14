@@ -7,8 +7,11 @@ const [profileDir] = process.argv.slice(2);
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: 'chrome',
   headless: process.env.HEADED !== '1',
-  viewport: { width: 1920, height: 1080 },
-  args: ['--remote-debugging-port=9333'],
+  // DSF=2 → Chrome con escala nativa 2 (como pantalla retina): la captura sale
+  // a 3840x2160 y los zooms del video vertical se ven nítidos.
+  ...(process.env.DSF
+    ? { viewport: null, args: ['--remote-debugging-port=9333', '--window-size=1938,1176', `--force-device-scale-factor=${process.env.DSF}`] }
+    : { viewport: { width: 1920, height: 1080 }, args: ['--remote-debugging-port=9333'] }),
 });
 const page = context.pages()[0] ?? (await context.newPage());
 if (process.env.START_URL) await page.goto(process.env.START_URL);

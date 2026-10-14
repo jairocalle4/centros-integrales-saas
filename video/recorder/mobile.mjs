@@ -1,13 +1,15 @@
 // Escena "celular": captura cuadro a cuadro (30 fps sintéticos) un
 // desplazamiento suave del panel en tamaño teléfono, a doble resolución.
-// Uso: node mobile.mjs <carpeta-salida>
+// Uso: node mobile.mjs <app> <ruta> <nombre> <carpeta-salida>
+//   ej.: node mobile.mjs vetmanager /app/agenda movil-agenda ../vetmanager/clips
 import { chromium } from 'playwright';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-const [outDir] = process.argv.slice(2);
-const framesDir = join(outDir, 'movil-frames');
+const [app, ruta, nombre, outDir] = process.argv.slice(2);
+const { BASE } = await import(`./scenes-${app}.mjs`);
+const framesDir = join(outDir, `${nombre}-frames`);
 rmSync(framesDir, { recursive: true, force: true });
 mkdirSync(framesDir, { recursive: true });
 
@@ -21,7 +23,7 @@ const page = browser.contexts()[0].pages()[0];
 const cdp = await page.context().newCDPSession(page);
 await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
 try {
-  await page.goto('https://nexokids.pages.dev/app', { waitUntil: 'networkidle' });
+  await page.goto(BASE + ruta, { waitUntil: 'networkidle' });
   await page.waitForTimeout(3000);
   await page.addStyleTag({ content: '::-webkit-scrollbar{display:none} .__blur{filter:blur(6px)!important}' });
   await page.evaluate((s) => {
@@ -59,5 +61,5 @@ try {
   await browser.close().catch(() => {});
 }
 execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', '30', '-i', join(framesDir, '%05d.png'),
-  '-vf', 'format=yuv420p', '-c:v', 'libx264', '-crf', '15', '-preset', 'slow', join(outDir, 'movil.mp4')]);
-console.log('movil.mp4 listo');
+  '-vf', 'format=yuv420p', '-c:v', 'libx264', '-crf', '15', '-preset', 'slow', join(outDir, `${nombre}.mp4`)]);
+console.log(`${nombre}.mp4 listo`);

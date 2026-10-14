@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="grad512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4361ee"/>
+      <stop offset="100%" stop-color="#3f37c9"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#grad512)"/>
+  <!-- Huella veterinaria estilizada -->
+  <g fill="#ffffff">
+    <!-- Almohadilla central -->
+    <path d="M256 380c-48 0-85-32-85-69 0-27 27-48 51-48 11 0 24 5 34 13 10-8 23-13 34-13 24 0 51 21 51 48 0 37-37 69-85 69z"/>
+    <!-- Dedos / Almohadillas superiores -->
+    <ellipse cx="176" cy="235" rx="27" ry="37" transform="rotate(-18 176 235)"/>
+    <ellipse cx="230" cy="198" rx="27" ry="40" transform="rotate(-6 230 198)"/>
+    <ellipse cx="282" cy="198" rx="27" ry="40" transform="rotate(6 282 198)"/>
+    <ellipse cx="336" cy="235" rx="27" ry="37" transform="rotate(18 336 235)"/>
+    <!-- Cruz médica sutil en la parte inferior -->
+    <path d="M246 395h20v26h-20z"/>
+    <path d="M233 408h46v-6h-46z"/>
+  </g>
+</svg>
