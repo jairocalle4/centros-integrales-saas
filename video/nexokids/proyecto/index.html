@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="es" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>NexoKids — Promo vertical</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face {
+        font-family: "Inter";
+        src: url("assets/fonts/inter-latin-wght-normal.woff2") format("woff2");
+        font-weight: 100 900;
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215;
+      }
+      @font-face {
+        font-family: "Inter";
+        src: url("assets/fonts/inter-latin-ext-wght-normal.woff2") format("woff2");
+        font-weight: 100 900;
+        unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+      }
+      :root {
+        --indigo: #4f46e5;
+        --indigo-700: #4338ca;
+        --indigo-100: #e0e7ff;
+        --indigo-50: #eef2ff;
+        --slate-900: #0f172a;
+        --slate-700: #334155;
+        --slate-500: #64748b;
+        --slate-300: #cbd5e1;
+        --slate-200: #e2e8f0;
+        --slate-50: #f8fafc;
+        --green: #10b981;
+        --wa: #25d366;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--slate-50); }
+      #root {
+        position: relative; width: 100%; height: 100%; overflow: hidden;
+        font-family: "Inter", ui-sans-serif, system-ui, sans-serif; color: var(--slate-900);
+        background: var(--slate-50);
+      }
+      /* Fondo con manchas suaves de color de la app */
+      .blob { position: absolute; border-radius: 50%; filter: blur(80px); opacity: .55; }
+      #blob1 { width: 720px; height: 720px; left: -220px; top: -160px; background: #c7d2fe; }
+      #blob2 { width: 640px; height: 640px; right: -240px; top: 760px; background: #ddd6fe; }
+      #blob3 { width: 560px; height: 560px; left: 120px; bottom: -260px; background: #e0e7ff; }
+
+      /* Marca superior */
+      #brand { position: absolute; left: 0; right: 0; top: 96px; display: flex; justify-content: center; align-items: center; gap: 18px; }
+      .nk { display: flex; align-items: center; justify-content: center; background: var(--indigo); color: #fff; font-weight: 800; letter-spacing: -0.02em; }
+      #brand .nk { width: 64px; height: 64px; border-radius: 16px; font-size: 28px; }
+      #brand span { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
+
+      /* ── Gancho ── */
+      #hook { position: absolute; inset: 0; }
+      .mess {
+        position: absolute; border-radius: 22px; background: #fff; box-shadow: 0 18px 50px rgba(15, 23, 42, .14);
+        padding: 22px 26px; font-size: 30px; font-weight: 700; display: flex; align-items: center; gap: 16px;
+      }
+      .mess svg { flex: none; }
+      #m1 { left: 70px; top: 230px; background: #fef9c3; color: #713f12; }
+      #m2 { right: 60px; top: 360px; color: #166534; }
+      #m3 { left: 90px; top: 1320px; background: #dcfce7; color: #14532d; max-width: 600px; }
+      #m4 { right: 70px; top: 1500px; background: #fff7ed; color: #9a3412; }
+      #m5 { left: 140px; top: 560px; background: #fae8ff; color: #701a75; font-size: 26px; }
+      #hookTitle {
+        position: absolute; left: 60px; right: 60px; top: 760px; text-align: center;
+        font-size: 92px; line-height: 1.08; font-weight: 900; letter-spacing: -0.035em;
+      }
+      #hookTitle .ln { display: block; }
+      #hookTitle .w { color: #79828e; }
+      #hookTitle .mark { position: relative; display: inline-block; }
+      #hookStrike { position: absolute; left: -6px; right: -6px; top: 54%; height: 14px; border-radius: 8px; background: #ef4444; transform-origin: 0 50%; }
+      #hookLogo { position: absolute; left: 0; right: 0; top: 820px; display: flex; justify-content: center; }
+      #hookLogo .nk { width: 220px; height: 220px; border-radius: 56px; font-size: 96px; box-shadow: 0 30px 80px rgba(79, 70, 229, .45); }
+
+      /* ── Titulares de beneficio ── */
+      .hl { position: absolute; left: 60px; right: 60px; top: 210px; text-align: center; }
+      .chip {
+        display: inline-flex; align-items: center; gap: 10px; padding: 12px 24px; border-radius: 999px;
+        background: var(--indigo-100); color: var(--indigo-700); font-size: 28px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase;
+      }
+      .hl h2 { margin-top: 22px; font-size: 76px; line-height: 1.06; font-weight: 900; letter-spacing: -0.035em; }
+      .hl h2 em { font-style: normal; color: var(--indigo); }
+
+      /* ── Ventana de la app ── */
+      #card {
+        position: absolute; left: 40px; top: 500px; width: 1000px; height: 916px; border-radius: 34px; overflow: hidden;
+        background: #fff; box-shadow: 0 40px 100px rgba(30, 27, 75, .22), 0 0 0 2px rgba(79, 70, 229, .08);
+      }
+      #bar { position: absolute; left: 0; right: 0; top: 0; height: 56px; background: #f1f5f9; display: flex; align-items: center; padding: 0 24px; gap: 10px; border-bottom: 1px solid var(--slate-200); }
+      #bar i { width: 14px; height: 14px; border-radius: 50%; background: #cbd5e1; display: block; }
+      #bar b { margin-left: 18px; flex: 1; height: 34px; border-radius: 10px; background: #fff; font-size: 20px; font-weight: 600; color: var(--slate-500); display: flex; align-items: center; padding-left: 16px; }
+      #vp { position: absolute; left: 0; top: 56px; width: 1000px; height: 860px; overflow: hidden; background: #f8fafc; }
+      .zw { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+      .zw video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+      /* ── Celular ── */
+      #phoneWrap { position: absolute; left: 0; right: 0; top: 430px; display: flex; justify-content: center; }
+      #phone { position: relative; width: 470px; height: 960px; border-radius: 70px; background: #0f172a; padding: 18px; box-shadow: 0 50px 110px rgba(15, 23, 42, .35); }
+      #screen { position: relative; width: 434px; height: 924px; border-radius: 54px; overflow: hidden; background: #fff; }
+      #screen video { position: absolute; left: 0; top: 0; width: 434px; height: 939px; }
+      .float { position: absolute; display: flex; align-items: center; gap: 14px; background: #fff; border-radius: 22px; padding: 18px 24px; font-size: 28px; font-weight: 800; box-shadow: 0 20px 50px rgba(15, 23, 42, .15); }
+      #f1 { left: 40px; top: 620px; }
+      #f2 { right: 40px; top: 1010px; }
+
+      /* ── Cierre ── */
+      #close { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding-top: 250px; }
+      #close .nk { width: 200px; height: 200px; border-radius: 52px; font-size: 88px; box-shadow: 0 30px 80px rgba(79, 70, 229, .4); }
+      #closeName { margin-top: 36px; font-size: 104px; font-weight: 900; letter-spacing: -0.04em; }
+      #closeFor { margin-top: 6px; font-size: 34px; font-weight: 700; color: var(--slate-500); }
+      #closeTag { margin-top: 40px; font-size: 54px; line-height: 1.15; font-weight: 800; text-align: center; letter-spacing: -0.02em; }
+      #closeTag em { font-style: normal; color: var(--indigo); }
+      #cta { margin-top: 56px; padding: 30px 60px; border-radius: 999px; background: var(--indigo); color: #fff; font-size: 46px; font-weight: 800; box-shadow: 0 24px 60px rgba(79, 70, 229, .45); }
+      .contact { margin-top: 30px; display: flex; align-items: center; gap: 20px; font-size: 50px; font-weight: 800; }
+      .contact .ic { width: 76px; height: 76px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+      #ctUrl { margin-top: 20px; font-size: 40px; color: var(--indigo-700); }
+      #ctUrl .ic { width: 64px; height: 64px; background: var(--indigo-100); }
+
+      /* ── Subtítulos ── */
+      #caps { position: absolute; left: 50px; right: 50px; top: 1490px; height: 220px; }
+      .cap {
+        position: absolute; left: 0; right: 0; top: 0; text-align: center; font-size: 60px; line-height: 1.18;
+        font-weight: 900; letter-spacing: -0.02em; opacity: 0;
+      }
+      .cap span { color: #8b939e; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="34" data-width="1080" data-height="1920">
+      <div class="blob" id="blob1" data-layout-allow-overflow></div>
+      <div class="blob" id="blob2" data-layout-allow-overflow></div>
+      <div class="blob" id="blob3" data-layout-allow-overflow></div>
+
+      <!-- ── Narración (voz es-EC Andrea) ── -->
+      <audio id="vo1" src="assets/voz/01-gancho.mp3" data-start="0.30" data-duration="4.10" data-track-index="10" data-volume="1"></audio>
+      <audio id="vo2" src="assets/voz/02-agenda.mp3" data-start="4.65" data-duration="5.35" data-track-index="11" data-volume="1"></audio>
+      <audio id="vo3" src="assets/voz/03-cobros.mp3" data-start="10.25" data-duration="5.40" data-track-index="10" data-volume="1"></audio>
+      <audio id="vo4" src="assets/voz/04-gestion.mp3" data-start="15.90" data-duration="5.81" data-track-index="11" data-volume="1"></audio>
+      <audio id="vo5" src="assets/voz/05-acceso.mp3" data-start="21.96" data-duration="4.18" data-track-index="10" data-volume="1"></audio>
+      <audio id="vo6" src="assets/voz/06-cierre.mp3" data-start="26.39" data-duration="6.46" data-track-index="11" data-volume="1"></audio>
+
+      <!-- ── 0 · Gancho ── -->
+      <section id="hook" class="clip" data-start="0" data-duration="4.75" data-track-index="1">
+        <div class="mess" id="m1">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#a16207" stroke-width="2"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M8 8h7M8 12h7M8 16h4"/></svg>
+          Cuaderno de asistencia
+        </div>
+        <div class="mess" id="m2">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+          cobros_FINAL_v3.xlsx
+        </div>
+        <div class="mess" id="m5">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#a21caf" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
+          Agenda en papel
+        </div>
+        <div class="mess" id="m3">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="#16a34a"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z"/></svg>
+          “¿Ya pagó la mensualidad?”
+        </div>
+        <div class="mess" id="m4">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="2"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6"/></svg>
+          Recibo a mano N° 023
+        </div>
+        <h1 id="hookTitle">
+          <span class="ln"><span class="w">¿Tu</span> <span class="w">centro</span> <span class="w">integral</span></span>
+          <span class="ln"><span class="w">o</span> <span class="w">guardería</span> <span class="w">todavía</span></span>
+          <span class="ln"><span class="w">vive</span> <span class="w">en</span> <span class="mark"><span class="w">cuadernos</span> <span class="w">y</span> <span class="w">Excel?</span><span id="hookStrike"></span></span></span>
+        </h1>
+        <div id="hookLogo"><div class="nk">NK</div></div>
+      </section>
+
+      <!-- Marca superior durante las funciones -->
+      <div id="brand"><div class="nk">NK</div><span>NexoKids</span></div>
+
+      <!-- ── Titulares de beneficio ── -->
+      <div class="hl clip" id="hl1" data-start="4.55" data-duration="5.70" data-track-index="2">
+        <div class="chip">Agenda · Asistencia</div>
+        <h2>Tu día, <em>en un vistazo</em></h2>
+      </div>
+      <div class="hl clip" id="hl2" data-start="10.25" data-duration="5.65" data-track-index="2">
+        <div class="chip">Cobros · WhatsApp</div>
+        <h2>Cobros claros, <em>saldos al día</em></h2>
+      </div>
+      <div class="hl clip" id="hl3" data-start="15.90" data-duration="1.85" data-track-index="2">
+        <div class="chip">Facturación electrónica</div>
+        <h2>Factura al <em>SRI</em></h2>
+      </div>
+      <div class="hl clip" id="hl4" data-start="17.75" data-duration="1.40" data-track-index="2">
+        <div class="chip">Documentos</div>
+        <h2>Actas <em>listas para firmar</em></h2>
+      </div>
+      <div class="hl clip" id="hl5" data-start="19.15" data-duration="2.81" data-track-index="2">
+        <div class="chip">Gastos · Reportes</div>
+        <h2>Tu <em>utilidad</em> del mes</h2>
+      </div>
+      <div class="hl clip" id="hl6" data-start="21.96" data-duration="4.43" data-track-index="2">
+        <div class="chip">En la nube</div>
+        <h2>Tu centro, <em>donde estés</em></h2>
+      </div>
+
+      <!-- ── Ventana de la app con zoom ── -->
+      <div id="card">
+        <div id="bar"><i></i><i></i><i></i><b>nexokids.pages.dev/app</b></div>
+        <div id="vp" data-layout-allow-overflow>
+          <div class="zw" data-layout-allow-overflow id="zw-a1"><video id="v-a1" src="assets/clips/agenda.mp4" muted playsinline data-start="4.65" data-duration="2.70" data-media-start="1.0" data-track-index="3"></video></div>
+          <div class="zw" data-layout-allow-overflow id="zw-a2"><video id="v-a2" src="assets/clips/agenda.mp4" muted playsinline data-start="7.35" data-duration="2.90" data-media-start="9.9" data-track-index="3"></video></div>
+          <div class="zw" data-layout-allow-overflow id="zw-c1"><video id="v-c1" src="assets/clips/cobros.mp4" muted playsinline data-start="10.25" data-duration="2.70" data-media-start="1.5" data-track-index="3"></video></div>
+          <div class="zw" data-layout-allow-overflow id="zw-c2"><video id="v-c2" src="assets/clips/cobros.mp4" muted playsinline data-start="12.95" data-duration="2.95" data-media-start="8.6" data-track-index="3"></video></div>
+          <div class="zw" data-layout-allow-overflow id="zw-f"><video id="v-f" src="assets/clips/facturas.mp4" muted playsinline data-start="15.90" data-duration="1.85" data-media-start="0.8" data-track-index="3"></video></div>
+          <div class="zw" data-layout-allow-overflow id="zw-t"><video id="v-t" src="assets/clips/acta.mp4" muted playsinline data-start="17.75" data-duration="1.40" data-media-start="2.6" data-track-index="3"></video></div>
+          <div class="zw" data-layout-allow-overflow id="zw-r"><video id="v-r" src="assets/clips/reportes.mp4" muted playsinline data-start="19.15" data-duration="2.81" data-media-start="0.05" data-playback-rate="0.55" data-track-index="3"></video></div>
+        </div>
+      </div>
+
+      <!-- ── Celular ── -->
+      <div id="phoneWrap">
+        <div id="phone">
+          <div id="screen" data-layout-allow-overflow>
+            
+            <video id="v-m" src="assets/clips/movil.mp4" muted playsinline data-start="21.96" data-duration="4.43" data-media-start="0.3" data-track-index="4"></video>
+          </div>
+        </div>
+      </div>
+      <div class="float" id="f1">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        Computadora
+      </div>
+      <div class="float" id="f2">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.2"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>
+        Celular
+      </div>
+
+      <!-- ── Cierre ── -->
+      <section id="close" class="clip" data-start="26.20" data-duration="7.80" data-track-index="1">
+        <div class="nk" id="closeLogo">NK</div>
+        <div id="closeName">NexoKids</div>
+        <div id="closeFor">Para centros integrales y guarderías</div>
+        <div id="closeTag">Tu centro en orden,<em> más tiempo para los niños.</em></div>
+        <div id="cta">Pide tu demostración</div>
+        <div class="contact" id="ctWa">
+          <div class="ic" style="background: var(--wa)">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="#fff"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.1 13.9c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1-1.4-1-2.6s.6-1.8.9-2.1c.2-.2.5-.3.6-.3h.5c.1 0 .3 0 .5.4l.7 1.7c.1.1.1.3 0 .4l-.2.4-.3.4c-.1.1-.2.3-.1.5.1.2.6 1 1.3 1.6.9.8 1.7 1.1 1.9 1.2.2.1.4.1.5-.1l.7-.9c.2-.2.3-.2.5-.1l1.6.8c.2.1.4.2.4.3.1.1.1.6-.1 1.2z"/></svg>
+          </div>
+          099 169 3863
+        </div>
+        <div class="contact" id="ctUrl">
+          <div class="ic">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
+          </div>
+          nexokids.pages.dev/app
+        </div>
+      </section>
+
+      <!-- ── Subtítulos ── -->
+      <div id="caps"></div>
+    </div>
+
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      // ── Fondo vivo (determinista) ──
+      tl.fromTo("#blob1", { x: 0, y: 0 }, { x: 120, y: 90, duration: 34, ease: "sine.inOut" }, 0);
+      tl.fromTo("#blob2", { x: 0, y: 0 }, { x: -140, y: -120, duration: 34, ease: "sine.inOut" }, 0);
+      tl.fromTo("#blob3", { x: 0, y: 0 }, { x: 90, y: -60, duration: 34, ease: "sine.inOut" }, 0);
+
+      // ── Gancho ──
+      const mess = ["#m1", "#m2", "#m5", "#m3", "#m4"];
+      const rot = [-7, 6, -4, 5, -6];
+      mess.forEach((id, i) => {
+        tl.fromTo(id, { opacity: 0, scale: 0.6, rotation: rot[i] * 3, y: 40 },
+          { opacity: 1, scale: 1, rotation: rot[i], y: 0, duration: 0.5, ease: "back.out(1.8)" }, 0.15 + i * 0.28);
+        tl.to(id, { rotation: rot[i] * -0.6, duration: 0.18, repeat: 5, yoyo: true, ease: "sine.inOut" }, 2.0 + i * 0.05);
+        tl.to(id, { x: (540 - (i % 2 ? 760 : 320)) * 0.9, y: (i < 3 ? 420 : -480), scale: 0.15, opacity: 0, rotation: 0, duration: 0.45, ease: "power3.in" }, 3.9 + i * 0.03);
+      });
+      const L1 = [0.10, 0.20, 0.46, 0.90, 0.96, 1.44, 1.91, 2.17, 2.28, 2.84, 2.94];
+      const hookWords = document.querySelectorAll("#hookTitle .w");
+      tl.fromTo("#hookTitle", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 0.1);
+      hookWords.forEach((w, i) => {
+        const t = 0.30 + L1[i];
+        const isEnd = i >= 8;
+        tl.to(w, { color: isEnd ? "#ef4444" : "#0f172a", duration: 0.12 }, t);
+      });
+      tl.fromTo("#hookStrike", { scaleX: 0 }, { scaleX: 1, duration: 0.35, ease: "power2.out" }, 3.55);
+      tl.to("#hookTitle", { opacity: 0, scale: 0.9, duration: 0.2, ease: "power2.in" }, 3.92);
+      tl.fromTo("#hookLogo .nk", { scale: 0, rotation: -25 }, { scale: 1, rotation: 0, duration: 0.4, ease: "back.out(2)" }, 4.1);
+      tl.to("#hookLogo .nk", { scale: 0.29, y: -724, x: -112, duration: 0.35, ease: "power3.inOut" }, 4.5);
+
+      // ── Marca superior ──
+      tl.set("#brand", { opacity: 0 }, 0);
+      tl.to("#brand", { opacity: 1, duration: 0.25 }, 4.65);
+      tl.to("#brand", { opacity: 0, duration: 0.3 }, 26.1);
+
+      // ── Titulares ──
+      ["#hl1", "#hl2", "#hl3", "#hl4", "#hl5", "#hl6"].forEach((id) => {
+        const el = document.querySelector(id);
+        const s = parseFloat(el.dataset.start);
+        tl.fromTo(`${id} .chip`, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, s + 0.02);
+        tl.fromTo(`${id} h2`, { opacity: 0, y: 36 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, s + 0.08);
+      });
+
+      // ── Ventana: aparición, zooms y salida ──
+      const VW = 1000;
+      const R = (rx, ry, rw) => { const s = VW / rw; return { x: -rx * s, y: -ry * s, scale: s }; };
+      tl.set("#card", { opacity: 0 }, 0);
+      tl.fromTo("#card", { opacity: 0, y: 80, scale: 0.92 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "power3.out" }, 4.5);
+      const shots = [
+        ["#zw-a1", 4.65, 2.70, [1190, 205, 500], [1215, 220, 460]],
+        ["#zw-a2", 7.35, 2.90, [470, 330, 760], [890, 350, 490], 0.75],
+        ["#zw-c1", 10.25, 2.70, [440, 512, 500], [1000, 512, 500], 0.35],
+        ["#zw-c2", 12.95, 2.95, [720, 340, 500], [745, 355, 470]],
+        ["#zw-f", 15.90, 1.85, [860, 150, 560], [900, 170, 520]],
+        ["#zw-t", 17.75, 1.40, [640, 60, 640], [660, 80, 600]],
+      ];
+      shots.forEach(([id, s, d, from, to, delay = 0]) => {
+        tl.set(id, { transformOrigin: "0 0", ...R(...from) }, 0);
+        tl.to(id, { ...R(...to), duration: d - delay - 0.15, ease: "power2.inOut" }, s + delay);
+      });
+      // Reportes: Ingresos → Gastos → Utilidad
+      tl.set("#zw-r", { transformOrigin: "0 0", ...R(520, 320, 600) }, 0);
+      tl.to("#zw-r", { ...R(520, 520, 600), duration: 0.6, ease: "power2.inOut" }, 19.15 + 0.8);
+      tl.to("#zw-r", { ...R(1000, 520, 600), duration: 0.6, ease: "power2.inOut" }, 19.15 + 1.75);
+      // pequeño "golpe" en cada corte
+      tl.set("#vp", { scale: 1, transformOrigin: "50% 50%" }, 0);
+      [7.35, 10.25, 12.95, 15.90, 17.75, 19.15].forEach((t) => {
+        tl.set("#vp", { scale: 1.035 }, t);
+        tl.to("#vp", { scale: 1, duration: 0.35, ease: "power2.out" }, t);
+      });
+      tl.to("#card", { opacity: 0, y: -60, scale: 0.95, duration: 0.35, ease: "power2.in" }, 21.65);
+
+      // ── Celular ──
+      tl.set(["#phoneWrap", "#f1", "#f2"], { opacity: 0 }, 0);
+      tl.fromTo("#phoneWrap", { opacity: 0, y: 160 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 21.9);
+      tl.fromTo("#f1", { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.4, ease: "back.out(1.6)" }, 23.4);
+      tl.fromTo("#f2", { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.4, ease: "back.out(1.6)" }, 24.75);
+      tl.to(["#phoneWrap", "#f1", "#f2", "#hl6 .chip", "#hl6 h2"], { opacity: 0, y: -40, duration: 0.3, ease: "power2.in" }, 25.95);
+
+      // ── Cierre ──
+      tl.fromTo("#closeLogo", { scale: 0, rotation: -20 }, { scale: 1, rotation: 0, duration: 0.55, ease: "back.out(2)" }, 26.3);
+      tl.fromTo("#closeName", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, 26.45);
+      tl.fromTo("#closeFor", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 26.75);
+      tl.fromTo("#closeTag", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, 27.45);
+      tl.fromTo("#cta", { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 30.8);
+      tl.to("#cta", { scale: 1.06, duration: 0.4, repeat: 5, yoyo: true, ease: "sine.inOut" }, 31.3);
+      tl.fromTo("#ctWa", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 29.2);
+      tl.fromTo("#ctUrl", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 29.5);
+
+      // ── Subtítulos con resaltado por palabra ──
+      // [inicio de la frase, tiempos de cada palabra de la voz, grupos de tokens]
+      // Un token ["texto", n] consume n palabras de la voz (SRI = "ese, erre, í").
+      const lines = [
+        [4.65, [0.10, 0.74, 0.84, 1.60, 1.81, 1.92, 2.26, 2.45, 2.70, 2.77, 3.18, 3.27, 3.84, 3.93],
+          [["NexoKids", "lo", "organiza:"], ["ves", "la", "agenda", "del", "día"], ["y", "marcas", "la", "asistencia"], ["en", "segundos."]]],
+        [10.25, [0.10, 0.47, 0.66, 0.75, 1.30, 1.55, 1.74, 2.07, 2.26, 2.87, 2.98, 3.08, 3.49, 3.60, 3.97, 4.14],
+          [["Sabes", "quién", "te", "debe,"], ["aunque", "haya", "pagado", "una", "parte,"], ["y", "le", "envías", "el", "recibo"], ["por", "WhatsApp."]]],
+        [15.90, [0.10, 0.61, 0.73, 1.14, 1.65, 2.02, 2.43, 2.70, 2.77, 3.30, 3.38, 3.86, 4.03, 4.45, 4.48],
+          [["Facturas", "al", ["SRI,", 3]], ["imprimes", "actas", "de", "compromiso"], ["y", "controlas", "tus", "gastos"], ["y", "utilidad."]]],
+        [21.96, [0.10, 0.34, 0.46, 0.66, 0.76, 1.47, 1.69, 2.09, 2.76, 2.84],
+          [["Todo", "lo", "ves", "al", "momento,"], ["desde", "cualquier", "computadora"], ["o", "celular."]]],
+        [26.39, [0.10, 1.10, 1.23, 1.59, 1.69, 2.24, 2.31, 2.57, 2.85, 3.04, 3.24, 4.52, 4.81, 4.92],
+          [["NexoKids:"], ["tu", "centro", "en", "orden,"], ["y", "más", "tiempo", "para", "los", "niños."], ["Pide", "tu", "demostración."]]],
+      ];
+      const durs = { 4.65: 5.35, 10.25: 5.40, 15.90: 5.81, 21.96: 4.18, 26.39: 6.46 };
+      const caps = document.getElementById("caps");
+      lines.forEach(([start, times, groups]) => {
+        let wi = 0;
+        const built = groups.map((g) => {
+          const el = document.createElement("div");
+          el.className = "cap";
+          const spans = g.map((tok) => {
+            const [text, n] = Array.isArray(tok) ? tok : [tok, 1];
+            const sp = document.createElement("span");
+            sp.textContent = text;
+            el.appendChild(sp);
+            el.appendChild(document.createTextNode(" "));
+            const t = start + times[wi];
+            wi += n;
+            return [sp, t];
+          });
+          caps.appendChild(el);
+          return { el, spans, t0: spans[0][1] - 0.08 };
+        });
+        built.forEach((b, i) => {
+          const end = i + 1 < built.length ? built[i + 1].t0 : start + durs[start] + 0.25;
+          tl.fromTo(b.el, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.16, ease: "power2.out" }, b.t0);
+          tl.to(b.el, { opacity: 0, duration: 0.1 }, end - 0.1);
+          b.spans.forEach(([sp, t], k) => {
+            tl.to(sp, { color: "#4f46e5", duration: 0.08 }, t);
+            if (k > 0) tl.to(b.spans[k - 1][0], { color: "#0f172a", duration: 0.08 }, t);
+          });
+        });
+      });
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

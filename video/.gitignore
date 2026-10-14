@@ -1,0 +1,16 @@
+# Videos promocionales: se guarda el proyecto editable, no lo pesado o regenerable.
+node_modules/
+
+# Grabaciones crudas y cuadros sueltos (se regeneran con recorder/)
+*/clips/
+*/clips-ensayo/
+*-frames/
+
+# Renders finales y temporales (se regeneran con `npm run render` en proyecto/)
+/*/*.mp4
+*.tmp.mp4
+*/proyecto/.hyperframes/
+*/proyecto/renders/
+
+# Lista local de datos a difuminar (contiene datos reales: nunca a Git)
+*.local.json
