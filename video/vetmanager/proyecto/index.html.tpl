@@ -230,7 +230,7 @@
 
       <!-- ── Ventana de la app (zoom + cursor dibujado a 30 fps) ── -->
       <div id="card">
-        <div id="bar"><i></i><i></i><i></i><b>vetmanager-saas.pages.dev/app</b></div>
+        <div id="bar"><i></i><i></i><i></i><b>VetManager · Panel de la clínica</b></div>
         <div id="vp" data-layout-allow-overflow>
           <!--@VIDEOS@-->
         </div>
@@ -286,10 +286,6 @@
             <svg width="44" height="44" viewBox="0 0 24 24" fill="#fff"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.1 13.9c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1-1.4-1-2.6s.6-1.8.9-2.1c.2-.2.5-.3.6-.3h.5c.1 0 .3 0 .5.4l.7 1.7c.1.1.1.3 0 .4l-.2.4-.3.4c-.1.1-.2.3-.1.5.1.2.6 1 1.3 1.6.9.8 1.7 1.1 1.9 1.2.2.1.4.1.5-.1l.7-.9c.2-.2.3-.2.5-.1l1.6.8c.2.1.4.2.4.3.1.1.1.6-.1 1.2z"/></svg>
           </div>
           099 169 3863
-        </div>
-        <div class="contact" id="ctUrl">
-          <div class="ic"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#4361ee" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div>
-          vetmanager-saas.pages.dev/app
         </div>
       </section>
 
@@ -431,7 +427,6 @@
       tl.fromTo("#closeFor", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 52.2);
       tl.fromTo("#closeTag", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, 52.9);
       tl.fromTo("#ctWa", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 54.6);
-      tl.fromTo("#ctUrl", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 54.9);
       tl.fromTo("#cta", { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 56.6);
       tl.to("#cta", { scale: 1.06, duration: 0.4, repeat: 5, yoyo: true, ease: "sine.inOut" }, 57.1);
 
