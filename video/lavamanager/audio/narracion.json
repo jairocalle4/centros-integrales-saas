@@ -1,0 +1,11 @@
+[
+  { "id": "01-gancho", "text": "¿Pedidos en papel y prendas que se confunden? Organiza tu lavandería con Lava Manager." },
+  { "id": "02-recepcion", "text": "Recibe la ropa por kilo o por prenda, registra el abono y entrega un ticket con su número de orden." },
+  { "id": "03-taller", "text": "En el taller, cada orden avanza: recibido, lavándose, listo en percha y entregado." },
+  { "id": "04-whatsapp", "text": "Y con el plan Premium, el cliente recibe un WhatsApp automático cuando su ropa está lista, sin que tú escribas nada." },
+  { "id": "05-cobro", "text": "Al retirar, cobras el saldo e imprimes el recibo para tu cliente; y si lo desea, facturas al ese, erre, í, el mismo pedido, con sus datos o como consumidor final." },
+  { "id": "06-caja", "text": "Cada turno de caja se cierra con arqueo, y todo cuadra." },
+  { "id": "07-dueno", "text": "Y si eres el dueño, ves al momento lo que se vendió y lo que se lavó, aunque no estés en el local." },
+  { "id": "08-reportes", "text": "Ventas, gastos y kilos lavados, desde la compu, la tablet o el celular." },
+  { "id": "09-cierre", "text": "Lava Manager: tu lavandería organizada y tus clientes siempre avisados. Pide tu demostración por WhatsApp." }
+]
