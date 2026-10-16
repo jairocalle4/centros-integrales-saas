@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "web", "dev", "--port", "5180"],
       "port": 5180
+    },
+    {
+      "name": "nexokids-remotion",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "video/nexokids/remotion", "run", "dev", "--", "--no-open", "--port", "3300"],
+      "port": 3300
     }
   ]
 }
